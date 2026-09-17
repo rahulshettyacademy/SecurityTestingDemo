@@ -163,5 +163,26 @@ once they know how.
 
 ---
 
+## V05 — Cryptographic Failures: Plaintext Password Storage
+
+1. **Vulnerability ID:** V05
+2. **Vulnerability name:** Plaintext password storage (no hashing)
+3. **OWASP category:** A02:2021 – Cryptographic Failures
+4. **Feature:** Registration, Login, Password Reset
+5. **API endpoint:** `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/password-reset/confirm`
+6. **Vulnerable code location:** `backend/src/controllers/authController.ts` (`register`, `login`), `backend/src/controllers/passwordResetController.ts` (`confirmPasswordReset`), and `database/seed.sql` (seeded users)
+7. **What the normal user does:** Registers or logs in normally — the behavior looks identical to a secure implementation from the outside.
+8. **What the security tester changes:** Nothing about their own request — instead they inspect the database directly (as an instructor demonstrating "what an attacker sees after a data breach or SQL injection"): `docker compose exec postgres psql -U secureshop -d secureshop -c "SELECT email, password FROM users;"`.
+9. **Expected vulnerable behavior:** The `password` column contains the real, usable password in plain text for every account — e.g. `rahul@test.com | Rahul123!` — not a hash. Registering a new account or resetting a password writes the new value the same way.
+10. **Why the vulnerability exists:** `register`, `login`, and `confirmPasswordReset` never call a hashing function. `register`/`confirmPasswordReset` write `password`/`newPassword` straight into the `password` column; `login` compares with plain `===` instead of a constant-time hash comparison.
+11. **Secured implementation:** `secured` branch, same three locations. `register` and `confirmPasswordReset` hash the password with `bcrypt.hash(password, 10)` before storing it; `login` compares with `bcrypt.compare(password, user.password)`. `seed.sql` stores bcrypt hashes instead of plaintext values.
+12. **How the remediation works:** bcrypt is a one-way, salted hash designed to be slow to brute-force. Even with full read access to the `users` table, an attacker gets hashes, not usable passwords — cracking them (if at all feasible, given bcrypt's cost factor) takes meaningfully more effort than a database read.
+13. **How to verify the fix:** Register a new account, then `psql` into `users` and confirm the `password` column holds a `$2b$...` bcrypt hash, not the plaintext value. Confirm login still succeeds with the original plaintext password (bcrypt.compare still recognizes it).
+14. **Tools that may detect it:** Manual DB inspection is definitive. Semgrep can flag the *absence* of a hashing call in an auth-related INSERT/UPDATE as a heuristic, but that's noisy; this is fundamentally something you confirm by looking at the stored value.
+15. **Best detection approach:** Manual testing / direct database inspection — this is the clearest way to demonstrate the impact to students, and is also exactly the audit step a real security review would take.
+16. **Suggested AI prompts:** See `AI_SECURITY_PROMPTS.md`, section "V05".
+
+---
+
 *(Further vulnerabilities are appended below as they are introduced on the
 `vulnerable` branch.)*

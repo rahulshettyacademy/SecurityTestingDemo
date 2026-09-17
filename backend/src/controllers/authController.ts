@@ -1,9 +1,6 @@
-import bcrypt from "bcrypt";
 import { Request, Response } from "express";
 import { pool } from "../db/pool";
 import { signToken } from "../utils/jwt";
-
-const BCRYPT_ROUNDS = 10;
 
 export async function register(req: Request, res: Response): Promise<void> {
   const { name, email, password } = req.body as { name?: string; email?: string; password?: string };
@@ -19,10 +16,13 @@ export async function register(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+  // SECURITY-LAB-VULNERABILITY: V05 - Cryptographic Failure (plaintext password storage)
+  // The password is stored exactly as submitted, with no hashing at all. If
+  // the users table is ever read (a SQL injection, a backup leak, an
+  // over-privileged admin query), every password is immediately usable.
   const result = await pool.query(
     "INSERT INTO users (name, email, password, role) VALUES ($1, $2, $3, 'CUSTOMER') RETURNING id, name, email, role",
-    [name, email, passwordHash]
+    [name, email, password]
   );
 
   const user = result.rows[0];
@@ -50,7 +50,10 @@ export async function login(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  const passwordMatches = await bcrypt.compare(password, user.password);
+  // SECURITY-LAB-VULNERABILITY: V05 - Cryptographic Failure (plaintext password comparison)
+  // Passwords are compared with plain string equality because they were
+  // never hashed at registration/reset time.
+  const passwordMatches = password === user.password;
   if (!passwordMatches) {
     res.status(401).json({ error: "Incorrect password" });
     return;

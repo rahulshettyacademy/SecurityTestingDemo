@@ -1,15 +1,17 @@
 -- RSA SecureShop seed data
 -- All accounts and data below are synthetic and for local training only.
 
--- Passwords (baseline/secured branches): bcrypt hashes of the plaintext
--- values documented in the STUDENT_GUIDE and INSTRUCTOR_GUIDE.
+-- SECURITY-LAB-VULNERABILITY: V05 - Cryptographic Failure (plaintext password storage)
+-- On this branch, passwords are stored in plaintext to demonstrate what an
+-- instructor sees after a database breach: `psql` or any DB client shows the
+-- real, usable password next to each account, with no hash to crack first.
 --   rahul@test.com  -> Rahul123!
 --   priya@test.com  -> Priya123!
 --   admin@test.com  -> Admin123!
 INSERT INTO users (id, name, email, password, role) VALUES
-    (101, 'Rahul Sharma', 'rahul@test.com', '$2b$10$xFk0KN8TpRyjjbK4HeKvWO3gbjjTPAsGMxCEejjR7KrMu3Q6MuuLS', 'CUSTOMER'),
-    (102, 'Priya Patel', 'priya@test.com', '$2b$10$oq.Ahf05M/S/vMtScKV94u/d13WsflngbcuIttcbqAFWEIFKeKeOa', 'CUSTOMER'),
-    (1, 'Site Administrator', 'admin@test.com', '$2b$10$bB/Ltr71SO9LSDnANsX9p.0ihdeQik4mGHvcXGG8te4maSyaEm7HK', 'ADMIN')
+    (101, 'Rahul Sharma', 'rahul@test.com', 'Rahul123!', 'CUSTOMER'),
+    (102, 'Priya Patel', 'priya@test.com', 'Priya123!', 'CUSTOMER'),
+    (1, 'Site Administrator', 'admin@test.com', 'Admin123!', 'ADMIN')
 ON CONFLICT (id) DO NOTHING;
 
 SELECT setval('users_id_seq', (SELECT GREATEST(MAX(id), 1) FROM users));

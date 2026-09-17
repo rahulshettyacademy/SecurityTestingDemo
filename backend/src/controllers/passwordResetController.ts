@@ -1,11 +1,9 @@
 import crypto from "crypto";
-import bcrypt from "bcrypt";
 import { Request, Response } from "express";
 import { pool } from "../db/pool";
 import { env } from "../config/env";
 
 const TOKEN_TTL_MINUTES = 30;
-const BCRYPT_ROUNDS = 10;
 
 // Training app has no real email provider: the reset link is printed to the
 // backend console (and echoed in the response during local development only)
@@ -67,8 +65,10 @@ export async function confirmPasswordReset(req: Request, res: Response): Promise
     return;
   }
 
-  const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
-  await pool.query("UPDATE users SET password = $1 WHERE id = $2", [passwordHash, resetToken.user_id]);
+  // SECURITY-LAB-VULNERABILITY: V05 - Cryptographic Failure (plaintext password storage)
+  // The new password is written to the database exactly as submitted, with
+  // no hashing, matching the same flaw in authController.register/login.
+  await pool.query("UPDATE users SET password = $1 WHERE id = $2", [newPassword, resetToken.user_id]);
   await pool.query("UPDATE password_reset_tokens SET used = TRUE WHERE id = $1", [resetToken.id]);
 
   res.json({ message: "Password has been reset successfully" });

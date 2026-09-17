@@ -58,5 +58,26 @@ once they know how.
 
 ---
 
+## V02 — Injection: SQL Injection via String Concatenation
+
+1. **Vulnerability ID:** V02
+2. **Vulnerability name:** SQL Injection (unsanitized string concatenation in a search query)
+3. **OWASP category:** A03:2021 – Injection
+4. **Feature:** Product Search
+5. **API endpoint:** `GET /api/products/search?name=...`
+6. **Vulnerable code location:** `backend/src/controllers/productController.ts`, function `searchProducts`
+7. **What the normal user does:** Types a product name (e.g. "iphone") into the search box; the frontend calls `GET /api/products/search?name=iphone` and shows matching products.
+8. **What the security tester changes:** First probes with a lone single quote (`?name=test'`) to check whether the input reaches SQL unescaped, then submits a crafted payload as the search term, e.g. `?name=nonexistentproduct' OR '1'='1' -- `.
+9. **Expected vulnerable behavior:** The lone quote causes an HTTP `500` (a database syntax error — the query broke). The crafted payload returns **all 8 products** even though the literal search term ("nonexistentproduct") matches nothing — the injected `OR '1'='1'` makes the `WHERE` clause always true, and `--` comments out the rest of the original query.
+10. **Why the vulnerability exists:** The handler builds the SQL string with a template literal (`` `...ILIKE '%${name}%'...` ``) instead of using a parameterized query placeholder. The database cannot tell user-supplied data apart from query syntax, so quote characters and SQL keywords in the input are interpreted as part of the query itself.
+11. **Secured implementation:** `secured` branch, same file/function. The query goes back to a parameterized form: `pool.query("... WHERE name ILIKE $1 ...", [\`%${name}%\`])`.
+12. **How the remediation works:** With a parameterized query, the database driver sends the SQL text and the user value as two separate channels. The database always treats `$1` as a single data value, no matter what characters it contains — there is no way for a quote or a keyword in the input to change the query's structure.
+13. **How to verify the fix:** `?name=test'` → expect a normal `200` with an empty array (no product name contains a literal `'`), not a `500`. `?name=x' OR '1'='1' -- ` → expect `200` with an **empty array**, since the entire injected string is now treated as a literal (harmless) search term instead of SQL syntax.
+14. **Tools that may detect it:** Semgrep (rule pattern: SQL built via template literal / string concatenation passed to a query function) reliably flags this at the **source-code** level. SQLMap or ZAP's active scan can confirm it **dynamically** by fuzzing the `name` parameter.
+15. **Best detection approach:** SAST (Semgrep) is the fastest way to catch this class of bug before it ships; manual/DAST testing (the quote-probe technique above) is how a QA engineer without source access would find it.
+16. **Suggested AI prompts:** See `AI_SECURITY_PROMPTS.md`, section "V02".
+
+---
+
 *(Further vulnerabilities are appended below as they are introduced on the
 `vulnerable` branch.)*

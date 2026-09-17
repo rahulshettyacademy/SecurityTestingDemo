@@ -4,6 +4,7 @@ import { env } from "./config/env";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
 import adminRoutes from "./routes/adminRoutes";
 import authRoutes from "./routes/authRoutes";
+import debugRoutes from "./routes/debugRoutes";
 import orderRoutes from "./routes/orderRoutes";
 import passwordResetRoutes from "./routes/passwordResetRoutes";
 import productRoutes from "./routes/productRoutes";
@@ -25,6 +26,10 @@ export function createApp(): Express {
   app.use("/api/profile", profileRoutes);
   app.use("/api/admin", adminRoutes);
   app.use("/api/password-reset", passwordResetRoutes);
+
+  // SECURITY-LAB-VULNERABILITY: V06B - Security Misconfiguration (exposed debug endpoint)
+  // Mounted with no authentication middleware in front of it.
+  app.use("/api/debug", debugRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

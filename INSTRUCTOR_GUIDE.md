@@ -184,5 +184,48 @@ once they know how.
 
 ---
 
+## V06A / V06C — Security Misconfiguration: Verbose Error Responses / Development Configuration Left On
+
+1. **Vulnerability ID:** V06A/V06C
+2. **Vulnerability name:** Verbose error responses (stack traces, DB errors, and source file paths returned to the client) — V06A and V06C are documented together because they are the same root cause: this app's error handling was left in a "development-friendly" state everywhere, not just in one place.
+3. **OWASP category:** A05:2021 – Security Misconfiguration
+4. **Feature:** No single UI feature — this is a cross-cutting backend behavior that affects *any* endpoint that throws an unhandled error.
+5. **API endpoint:** Any — most easily reproduced via the V02 SQL Injection trigger, `GET /api/products/search?name=test'`.
+6. **Vulnerable code location:** `backend/src/middleware/errorHandler.ts`
+7. **What the normal user does:** Nothing special — normal requests never hit the error path.
+8. **What the security tester changes:** Sends a request designed to make the backend throw (a raw DB syntax error via V02's quote-trigger is the easiest, but any unhandled `Error` anywhere in the app takes the same path).
+9. **Expected vulnerable behavior:** Instead of a generic `500`, the JSON response includes: the raw error message (a real Postgres error in this case, e.g. `"unterminated quoted string at or near ..."`), the Postgres error `code` (`42601`), and a full `stack` trace that names the exact source file and line (`/app/src/controllers/productController.ts:21:18`) plus internal library frames (`pg-pool`). This hands an attacker a roadmap of your stack, file layout, and exact failure point — and, as seen here, amplifies whatever *other* bug triggered the error (V02 becomes much easier to exploit once you can see the database's own error text).
+10. **Why the vulnerability exists:** `errorHandler` checks `NODE_ENV` and includes full error detail whenever it is not exactly `"production"` — and this lab's default `NODE_ENV` is `"development"` (see `docker-compose.yml` / `.env.example`), so verbose output is on by default, exactly as it would be if a real team forgot to set `NODE_ENV=production` before deploying.
+    > **A note on why this isn't the same as the forbidden `LAB_MODE` toggle:** the spec for this course explicitly disallows using an environment variable to switch between an entirely separate "vulnerable implementation" and "secure implementation." That's not what's happening here — `NODE_ENV`-driven error verbosity *is itself* the vulnerability being taught (A05: "Security Misconfiguration — Development Configuration"), not a shortcut used to avoid writing a vulnerable/secure code pair. The `secured` branch's error handler is a genuinely different function that never includes stack/DB detail, regardless of `NODE_ENV` — there is no flag that "unlocks" secure behavior. The env var here is *input the vulnerable code reacts to*, the same way V02's vulnerability reacts to the `name` query parameter.
+11. **Secured implementation:** `secured` branch, same file. The handler always returns the generic `{"error":"Something went wrong. Please try again later."}` with `500`, regardless of `NODE_ENV`. The real error is still logged server-side via `console.error` for developers/operators to see in the container logs — it just never reaches the HTTP response.
+12. **How the remediation works:** Diagnostic detail (stack traces, DB errors, file paths) is operationally useful but should only ever be visible to people with access to server logs, never to an HTTP client. Removing the `NODE_ENV` branch entirely closes the leak in every environment, including a misconfigured one.
+13. **How to verify the fix:** Repeat the `?name=test'` request; expect the generic message only, and confirm the real error still appears in `docker compose logs backend`.
+14. **Tools that may detect it:** OWASP ZAP's passive scan flags stack traces and verbose error disclosure automatically once it sees one in a response. Manual testing (triggering an error and reading the body) is equally effective and requires no tooling.
+15. **Best detection approach:** DAST (ZAP passive scan) is very reliable here since verbose errors are a recognizable response pattern; manual testing confirms it directly.
+16. **Suggested AI prompts:** See `AI_SECURITY_PROMPTS.md`, section "V06A".
+
+---
+
+## V06B — Security Misconfiguration: Unauthenticated Debug Endpoint
+
+1. **Vulnerability ID:** V06B
+2. **Vulnerability name:** Debug/diagnostic endpoint exposed with no authentication
+3. **OWASP category:** A05:2021 – Security Misconfiguration
+4. **Feature:** None — not linked from any UI; only discoverable by guessing/scanning API paths.
+5. **API endpoint:** `GET /api/debug/config`
+6. **Vulnerable code location:** `backend/src/routes/debugRoutes.ts`, mounted in `backend/src/app.ts`
+7. **What the normal user does:** Never encounters this endpoint — it has no link in the UI.
+8. **What the security tester changes:** Calls `GET /api/debug/config` directly, with no `Authorization` header at all.
+9. **Expected vulnerable behavior:** Returns `200` with `{"environment":"development","databaseHost":"postgres","applicationVersion":"1.0.0","jwtExpiresIn":"2h"}` — no login required. (Only harmless, synthetic values are returned in this lab; a real-world equivalent might leak far more.)
+10. **Why the vulnerability exists:** The route is mounted in `app.ts` with no `authenticate` middleware in front of it — a diagnostic endpoint that was presumably useful during development and never removed or protected before "shipping."
+11. **Secured implementation:** `secured` branch removes the debug route entirely (it is not mounted in `app.ts` at all — the safest fix for an endpoint with no legitimate production use case).
+12. **How the remediation works:** An endpoint that doesn't exist in the running app can't be called by anyone, authenticated or not. (An alternative fix — restricting it to admins — is discussed in `AI_SECURITY_PROMPTS.md` as a remediation-design exercise, but the shipped fix here is outright removal.)
+13. **How to verify the fix:** `GET /api/debug/config` → expect `404 {"error":"Resource not found"}`.
+14. **Tools that may detect it:** OWASP ZAP's spider/active scan can surface forgotten endpoints if they're reachable from a crawlable path (this one isn't linked anywhere, so a scanner would need a wordlist/fuzzing approach, e.g. ZAP's forced browse add-on). Manual API-path guessing is the direct approach here.
+15. **Best detection approach:** DAST with forced-browsing/content-discovery (ZAP's forced browse, or a tool like `ffuf`/`gobuster` against `/api/*`), since this endpoint is unlinked and won't appear from normal crawling or manual UI exploration alone.
+16. **Suggested AI prompts:** See `AI_SECURITY_PROMPTS.md`, section "V06B".
+
+---
+
 *(Further vulnerabilities are appended below as they are introduced on the
 `vulnerable` branch.)*

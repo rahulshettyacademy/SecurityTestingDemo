@@ -4,36 +4,55 @@ This document is organized to match a specific teaching flow, one
 vulnerability at a time:
 
 1. **Explain the concept** (use `INSTRUCTOR_GUIDE.md`'s write-up for that
-   vulnerability).
+   vulnerability) — what the vulnerability class is, why it happens, what
+   OWASP category it falls under.
 2. **Show it live** on the `vulnerable` branch — reproduce the exact steps
    in `INSTRUCTOR_GUIDE.md`.
 3. **Show the fix** on the `secured` branch — walk the code change, then
    `git diff vulnerable..secured -- <file>`.
-4. **Hand it to AI.** Before moving on, paste the **Vulnerability
-   Discovery** prompt below for that vulnerability into an AI coding
-   assistant pointed at this repo. The point of this step: you (or the
-   instructor) already found *one* specific bug by hand. The prompt asks
-   the AI to review the same area with fresh eyes — it should surface the
-   bug you already found, *and often something adjacent you didn't
-   specifically go looking for* (a missing check on a related endpoint, an
-   edge case in the fix, a related OWASP category). That's the demonstration:
-   manual testing found one thing; AI-assisted review widens the net.
+4. **Hand it to AI — cold.** Paste the **Vulnerability Discovery** prompt
+   below into an AI coding assistant pointed at this repo, checked out on
+   the `vulnerable` branch. This prompt is written from *concept knowledge
+   only* — it never says "I already found X" or names this course's
+   internal vulnerability IDs. It describes the vulnerability *class* the
+   way a real tester would think about it (e.g., "endpoints that load a
+   resource by ID without verifying ownership"), the same understanding you
+   just built in step 1, and asks the AI to scan the codebase for it from
+   scratch. The teaching point: once a student actually understands a
+   vulnerability class, they don't have to manually click through every
+   endpoint to find instances of it — a well-grounded prompt can have AI do
+   that scan for them. Run it, and confirm together that the AI's answer
+   correctly lands on the same file/function you just demonstrated by hand
+   in step 2.
 
-Each vulnerability section below has four prompts: **Code Understanding**
-(orient before testing), **Vulnerability Discovery** (the step-4 prompt,
-designed to find more than the one scripted example), **Remediation**
-(design the smallest correct fix), and **Regression Testing** (generate the
-automated proof). Two general-purpose categories — **Threat Modeling** and
-**Scanner Analysis** — appear once at the end, since they apply across
-vulnerabilities rather than to one specific bug.
+Each vulnerability section below has four prompts: **Vulnerability
+Discovery** (the step-4 prompt above — the one to use live in class),
+**Code Understanding** (a follow-up for orienting deeper in the affected
+code), **Remediation** (design the smallest correct fix), and **Regression
+Testing** (generate the automated proof). Two general-purpose categories —
+**Threat Modeling** and **Scanner Analysis** — appear once at the end,
+since they apply across vulnerabilities rather than to one specific bug.
 
 Every prompt assumes the AI has access to this repository (as a coding
 assistant with file access, not a general chat model) and is scoped to
-`RSA SecureShop` — none of these are written to be pointed at a real system.
+RSA SecureShop — none of these are written to be pointed at a real system.
 
 ---
 
 ## V01 — Broken Access Control (IDOR)
+
+**Vulnerability Discovery**
+> Review this Express + PostgreSQL backend for Broken Access Control
+> vulnerabilities, specifically Insecure Direct Object Reference (IDOR):
+> any endpoint that accepts a resource ID (from the URL, query string, or
+> body) and returns or modifies that resource without verifying the
+> authenticated caller actually owns it, or has an explicit, checked reason
+> to access it. Being logged in (authentication) is not the same as being
+> allowed to see this specific resource (authorization) — flag any place
+> where only the former is verified. For each finding: name the file,
+> function, and exact line; describe the concrete request that would prove
+> it (what value to change, and what response difference confirms it); and
+> state what check is missing.
 
 **Code Understanding**
 > Trace `GET /api/orders/:orderId` from the Express route
@@ -42,17 +61,6 @@ assistant with file access, not a general chat model) and is scoped to
 > made along the way, and state explicitly, for each one, whether it checks
 > *who is asking* (authentication) or *what they're allowed to see*
 > (authorization).
-
-**Vulnerability Discovery**
-> I manually found that `GET /api/orders/:orderId` returns another user's
-> order with no ownership check. Review the rest of `backend/src/routes/`
-> and `backend/src/controllers/` for the same class of bug: any endpoint
-> that takes an ID from the URL, request body, or query string and loads a
-> row from the database without verifying the requesting user owns that
-> row (or has an explicit, role-checked reason to see it). Do not assume
-> that because a route requires `authenticate`, it's also correctly
-> authorized — those are different checks. List every endpoint you'd flag,
-> even if you're not certain, and explain your reasoning for each.
 
 **Remediation**
 > Suggest the smallest possible change to `getOrderById` that fixes the
@@ -69,20 +77,22 @@ assistant with file access, not a general chat model) and is scoped to
 
 ## V01B — Broken Access Control (Vertical Privilege Escalation)
 
+**Vulnerability Discovery**
+> Review this Express backend's route definitions for vertical privilege
+> escalation: any route whose purpose implies it should be restricted to a
+> specific role (e.g., an admin-only feature) but is only protected by a
+> general "is this user logged in" check, not a check on *which role* the
+> user has. For every router file, list which middleware(s) run before each
+> handler and in what order, and flag any route where a role check appears
+> to be missing given what the route does. Name the file and line for each
+> finding, and describe what request (logged in as which role) would prove
+> the gap.
+
 **Code Understanding**
 > Explain the difference between `authenticate` and `requireAdmin` in
 > `backend/src/middleware/auth.ts`. For every route file in
 > `backend/src/routes/`, list which middleware(s) are applied and in what
 > order.
-
-**Vulnerability Discovery**
-> I manually found that `GET /api/admin/users` only requires
-> `authenticate`, not `requireAdmin` — any logged-in customer can call it.
-> Check every other route under `backend/src/routes/` for the same
-> structural mistake: an admin-sounding feature or a sensitive
-> data-returning endpoint that's missing a role check it should have. Also
-> check whether any route applies `requireAdmin` in a way that could be
-> bypassed (e.g., applied to some routes in a router but not others).
 
 **Remediation**
 > Write the middleware chain that correctly restores role-based
@@ -98,24 +108,25 @@ assistant with file access, not a general chat model) and is scoped to
 
 ## V02 — SQL Injection
 
+**Vulnerability Discovery**
+> Review this Express + PostgreSQL backend for SQL Injection: any place a
+> database query is built by concatenating or interpolating a value into
+> the SQL text itself (a template literal or string concatenation)
+> rather than passing it as a parameterized placeholder (`$1`, `$2`, ...) in
+> a separate values array — where that interpolated value ultimately comes
+> from user input (`req.query`, `req.body`, or `req.params`). Check both the
+> direct call site and any case where the query string might be assigned to
+> a variable before being passed to `.query()`, since that indirection can
+> hide the issue from a simple text search. For each finding: name the
+> file, function, and line; and give one example input that would prove the
+> query's *logic* can be changed, not just cause an error.
+
 **Code Understanding**
 > Explain, in terms a QA engineer without a security background would
 > understand, why `pool.query(\`SELECT ... WHERE name ILIKE '%${name}%'\`)`
 > is dangerous but `pool.query("SELECT ... WHERE name ILIKE $1", [\`%${name}%\`])`
 > is not — even though both eventually put the same user input into the
 > same query logically.
-
-**Vulnerability Discovery**
-> I manually found that `GET /api/products/search` builds its SQL query via
-> string interpolation. Search the rest of `backend/src/` for every place a
-> database query is constructed, and flag any that build SQL as a string
-> (template literal or concatenation) using a variable that ultimately comes
-> from `req.query`, `req.body`, or `req.params`, rather than using a
-> parameterized placeholder. Note that our Semgrep AST-based rule for this
-> pattern missed one instance in this exact codebase because the query was
-> assigned to a variable before being passed to `.query()` — check whether
-> that same indirection exists anywhere else, since a simple text search
-> would also miss it.
 
 **Remediation**
 > Rewrite the vulnerable query to use a parameterized placeholder instead of
@@ -132,21 +143,20 @@ assistant with file access, not a general chat model) and is scoped to
 
 ## V03 — Stored Cross-Site Scripting
 
+**Vulnerability Discovery**
+> Review this React frontend for Cross-Site Scripting sinks: any place data
+> that came from another user's input (i.e., arrived via an API response,
+> not hardcoded in the component) is rendered using `dangerouslySetInnerHTML`,
+> assigned to a DOM node's `.innerHTML`, or otherwise bypasses React's
+> default text-escaping. For each finding: name the file and line, identify
+> which upstream API field the rendered value comes from, and check whether
+> that field is sanitized anywhere before this point (on the frontend or
+> the backend) — state clearly if it is not.
+
 **Code Understanding**
 > Explain what `dangerouslySetInnerHTML` does differently from normal JSX
 > expression interpolation (`{value}`), and why React's own naming
 > convention for this prop is a deliberate warning.
-
-**Vulnerability Discovery**
-> I manually found that `frontend/src/pages/ProductDetail.tsx` renders
-> review comments via `dangerouslySetInnerHTML`. Search the rest of
-> `frontend/src/` for any other place where data that originated from the
-> backend (i.e., from another user's input, not hardcoded in the frontend)
-> is rendered via `dangerouslySetInnerHTML`, `eval`, `new Function(...)`, or
-> assigned directly to `.innerHTML` on a DOM node. Also check whether the
-> backend does any output encoding on the way out (it shouldn't need to —
-> confirm React is the only thing standing between stored data and the
-> rendered page, and flag if that assumption is wrong anywhere).
 
 **Remediation**
 > Show the one-line change that fixes this, and explain why it's sufficient
@@ -167,19 +177,23 @@ assistant with file access, not a general chat model) and is scoped to
 
 ## V04A — No Login Rate Limiting
 
+**Vulnerability Discovery**
+> Review this Express backend's authentication-related routes (login,
+> registration, password reset) for missing rate limiting or brute-force
+> protection. For each such route, check whether any throttling, lockout,
+> or CAPTCHA-style middleware runs before the handler. For each route
+> missing this protection, name the file and line where the route is
+> declared, and describe what an attacker could do given unlimited
+> attempts, specific to what that particular endpoint does (credential
+> stuffing on login is a different risk than reset-token exhaustion on
+> password reset — describe each on its own terms, don't just say
+> "brute force" for all of them).
+
 **Code Understanding**
 > Explain what `express-rate-limit` does, what "keyed by IP" means in this
 > context, and what a legitimate user would experience versus what an
 > attacker running a password-guessing script would experience with a
 > 5-attempts-per-minute limit.
-
-**Vulnerability Discovery**
-> I manually found that `POST /api/auth/login` has no rate limiting. Check
-> whether `POST /api/auth/register` or `POST /api/password-reset/request`
-> have the same gap — both are also unauthenticated, attacker-reachable
-> endpoints where unlimited attempts could enable abuse (account
-> enumeration via mass registration attempts, or reset-token exhaustion/spam
-> respectively). Recommend whether each one needs its own rate limit and why.
 
 **Remediation**
 > Design a rate-limiting strategy for `POST /api/auth/login` that blocks
@@ -195,19 +209,22 @@ assistant with file access, not a general chat model) and is scoped to
 
 ## V04B — Username Enumeration
 
+**Vulnerability Discovery**
+> Review this Express backend's login and account-related endpoints for
+> information disclosure that would let an attacker determine whether a
+> specific email address has a registered account, without ever needing to
+> guess the correct password. Look specifically at error messages and
+> status codes that might differ between "this account doesn't exist" and
+> "this account exists but the credential was wrong" across every relevant
+> endpoint (login, registration, password reset) — not just login. For each
+> finding, name the file, function, and line, and quote the exact differing
+> response text.
+
 **Code Understanding**
 > Explain, from an attacker's perspective, what they can learn about a
 > system's user base if "unknown email" and "wrong password" return
 > different error messages — and why this matters even though neither
 > response reveals the password itself.
-
-**Vulnerability Discovery**
-> I manually found that the login endpoint distinguishes "User does not
-> exist" from "Incorrect password." Check whether `POST /api/auth/register`
-> (the "email already exists" 409 response) or the password-reset flow leak
-> the same kind of information through a different channel — for example,
-> does the response timing differ measurably between a valid and invalid
-> email (a timing side-channel), even if the message text is identical?
 
 **Remediation**
 > Rewrite the login handler so both failure cases return the identical
@@ -223,22 +240,21 @@ assistant with file access, not a general chat model) and is scoped to
 
 ## V04C — Logout Does Not Invalidate the Token
 
+**Vulnerability Discovery**
+> Review this Express backend's session/token lifecycle: trace what happens
+> to a JWT from login through to logout. Specifically check whether the
+> logout endpoint actually invalidates the token server-side (e.g., via a
+> revocation record checked on subsequent requests), or only relies on the
+> client discarding it. Name the file and function for both the logout
+> handler and the authentication middleware, and describe a concrete
+> request sequence (login, capture the token, log out, replay the same
+> token against a protected endpoint) that would prove whether it still
+> works after logout.
+
 **Code Understanding**
 > Explain the difference between a JWT's built-in expiry (`JWT_EXPIRES_IN`)
 > and server-side session revocation, and why relying on expiry alone is
 > insufficient for a working logout feature.
-
-**Vulnerability Discovery**
-> I manually found that `logout` never writes to the `revoked_tokens`
-> table. Check `backend/src/middleware/auth.ts`'s `authenticate` function
-> for whether the revocation check itself could be bypassed some other way
-> (for example, does it check `revoked_tokens` on *every* protected route,
-> or could a route exist that skips the `authenticate` middleware entirely
-> while still trusting a token from elsewhere?). Also check whether there's
-> any other way a user's session should be invalidated that this app
-> doesn't handle — for example, if a user changes their password, should
-> their other active sessions be revoked too? Is that currently the case
-> here?
 
 **Remediation**
 > Show the change that makes `logout` actually revoke the token, and
@@ -255,19 +271,20 @@ assistant with file access, not a general chat model) and is scoped to
 
 ## V05 — Plaintext Password Storage
 
+**Vulnerability Discovery**
+> Review this Express backend's user registration, login, and
+> password-reset code for how passwords are stored and compared.
+> Specifically check whether a one-way hashing function (like bcrypt) is
+> used before writing a password to the database, and whether login
+> compares the submitted password against a hash (via a constant-time
+> comparison function) rather than a plain string equality check. For each
+> finding, name the file, function, and line, and state exactly what you'd
+> see if you queried the database's `users` table directly.
+
 **Code Understanding**
 > Explain what `bcrypt.hash` and `bcrypt.compare` actually do, why bcrypt
 > specifically (versus, say, plain SHA-256) is the appropriate choice for
 > passwords, and what "salt" means in this context.
-
-**Vulnerability Discovery**
-> I manually found that `register`, `login`, and `confirmPasswordReset` all
-> handle passwords as plaintext. Check the codebase for any other place a
-> password (or a comparably sensitive value, like a reset token) is logged,
-> stored, or compared insecurely — for example, is the reset token in
-> `passwordResetController.ts` stored as-is in the database, and if so, is
-> that acceptable (hint: compare its purpose and lifetime to a password) or
-> should it also be hashed before storage?
 
 **Remediation**
 > Show the changes to `register`, `login`, and `confirmPasswordReset` needed
@@ -285,22 +302,22 @@ assistant with file access, not a general chat model) and is scoped to
 
 ## V06A / V06C — Verbose Error Responses / Development Configuration
 
+**Vulnerability Discovery**
+> Review this Express backend's error-handling middleware and any
+> route-level try/catch blocks. Check whether an unhandled exception (e.g.,
+> a database error) ever results in the raw error — a stack trace, an error
+> code, or the exception message — being included in the HTTP response sent
+> to the client, rather than being logged server-side only. Check
+> specifically whether this behavior depends on an environment variable
+> like `NODE_ENV`, and if so, what that variable's default value is in this
+> project's `docker-compose.yml` or `.env.example` (i.e., is verbose output
+> actually on by default in how this app normally runs?). Name the file and
+> line, and describe a request that would trigger and reveal this.
+
 **Code Understanding**
 > Explain what information an attacker gains from a stack trace, a database
 > error code, and a source file path in an HTTP response, and why each of
 > those is useful even without a working exploit yet.
-
-**Vulnerability Discovery**
-> I manually found that `errorHandler.ts` includes the full error object in
-> the response whenever `NODE_ENV !== 'production'`. Check whether any
-> individual route handler has its *own* try/catch block that might leak
-> similar detail independently of the global error handler (for example,
-> does `createOrder`'s catch block in `orderController.ts` ever return a raw
-> database error message in its 400 response, rather than the friendly
-> validation messages it's designed to return?). Also check whether
-> `console.error`/`console.log` calls anywhere in the codebase might log
-> sensitive request data (passwords, tokens) that shouldn't be written to
-> logs even in development.
 
 **Remediation**
 > Show the fix to `errorHandler.ts`, and explain why logging the real error
@@ -318,19 +335,21 @@ assistant with file access, not a general chat model) and is scoped to
 
 ## V06B — Exposed Debug Endpoint
 
+**Vulnerability Discovery**
+> Review this Express backend's full list of mounted routes (check the main
+> app setup file and every router file it imports) for any endpoint that
+> looks like it was added for development or debugging purposes rather than
+> a real product feature — for example, a route name containing "debug,"
+> "test," or "internal," or a route that doesn't correspond to anything
+> reachable from the frontend's navigation — and check whether it requires
+> authentication. For each finding, name the file and line where the route
+> is mounted, and state exactly what information the endpoint returns.
+
 **Code Understanding**
 > Explain why a debug/diagnostic endpoint that requires no authentication is
 > risky even when — like this one — it only returns synthetic, non-secret
 > values, thinking about how it changes an attacker's understanding of the
 > system's architecture.
-
-**Vulnerability Discovery**
-> I manually found `GET /api/debug/config`, which isn't linked from any
-> route the frontend navigates to. Search `backend/src/` for any other route
-> that similarly looks like it was added for development/debugging purposes
-> and never removed or protected (look for route names containing "debug,"
-> "test," "internal," or routes that don't correspond to anything in the
-> frontend's navigation).
 
 **Remediation**
 > Recommend two possible fixes: outright removal (what this repo actually
@@ -344,19 +363,20 @@ assistant with file access, not a general chat model) and is scoped to
 
 ## V07 — Insecure Design: Checkout Trusts a Client-Supplied Price
 
+**Vulnerability Discovery**
+> Review this Express backend's checkout/order-creation endpoint for
+> business-logic trust issues: does the server use any pricing, discount,
+> or total-amount value supplied directly in the request body, instead of
+> recalculating it from the product catalog stored in the database? Name
+> the file, function, and line, and describe the exact tampered request
+> body that would let a caller control what they're charged — and
+> explicitly distinguish this from the product ID and quantity fields,
+> which the server legitimately does need to trust from the request.
+
 **Code Understanding**
 > Explain why this bug is categorized as "Insecure Design" rather than a
 > straightforward input-validation bug — what would a code reviewer need to
 > understand about the *business rule* (not just the code) to catch this?
-
-**Vulnerability Discovery**
-> I manually found that `createOrder` uses `item.price` from the request
-> body when present. Check the rest of the checkout and cart flow for other
-> values the client sends that should instead be authoritative from the
-> server: does anything trust a client-supplied `total`, discount amount,
-> shipping cost, or stock-availability claim? Also check whether the
-> quantity field has any upper bound — could a client request an absurdly
-> large quantity and cause an integer overflow or a negative-stock state?
 
 **Remediation**
 > Show the fix, and explain why "the server still validates the product
@@ -374,19 +394,19 @@ assistant with file access, not a general chat model) and is scoped to
 
 ## V08 — Vulnerable and Outdated Components (Supply Chain)
 
+**Vulnerability Discovery**
+> This project has an isolated lab folder (`labs/supply-chain-demo`) with
+> its own `package.json`, separate from the main application's
+> dependencies. Run `npm audit` inside it, and separately inside `backend/`
+> and `frontend/`. Compare the results: which one reports vulnerabilities,
+> and what specific package and version is responsible? For the flagged
+> package, explain what class of vulnerability the advisories describe,
+> without needing to read that package's own source code.
+
 **Code Understanding**
 > Explain the difference between a vulnerability *in code we wrote* and a
 > vulnerability *in a dependency we installed*, and why SCA tooling (not
 > SAST or manual testing) is the right way to find the latter.
-
-**Vulnerability Discovery**
-> I ran `npm audit` in `labs/supply-chain-demo/` and found lodash 4.17.15
-> has several known advisories. Run `npm audit` (or `npm outdated`) in
-> `backend/` and `frontend/` and confirm they're actually clean — then check
-> whether any *indirect* (transitive) dependency anywhere in the project is
-> close to end-of-support or has a newer major version available, even if
-> `npm audit` doesn't currently flag it as vulnerable (a clean audit today
-> doesn't mean a dependency won't have a new CVE published next month).
 
 **Remediation**
 > Given `npm audit`'s suggested fix, explain the difference between

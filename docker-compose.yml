@@ -1,0 +1,70 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-secureshop}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secureshop_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-secureshop}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./database/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
+    # No ports published: PostgreSQL stays on the internal Docker network only.
+    networks:
+      - secureshop-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-secureshop}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 5000
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${POSTGRES_USER:-secureshop}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-secureshop_dev_password}
+      DB_NAME: ${POSTGRES_DB:-secureshop}
+      JWT_SECRET: ${JWT_SECRET:-rsa-secureshop-dummy-local-training-secret}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-2h}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000,http://127.0.0.1:3000}
+      FAKE_DEMO_API_KEY: ${FAKE_DEMO_API_KEY:-rsa-training-not-a-real-key}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      # Bound to localhost only - not reachable from other machines.
+      - "127.0.0.1:5000:5000"
+    networks:
+      - secureshop-net
+    volumes:
+      - ./backend/src:/app/src
+
+  frontend:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://127.0.0.1:5000/api}
+    depends_on:
+      - backend
+    ports:
+      # Bound to localhost only - not reachable from other machines.
+      - "127.0.0.1:3000:3000"
+    networks:
+      - secureshop-net
+    volumes:
+      - ./frontend/src:/app/src
+
+networks:
+  secureshop-net:
+    driver: bridge
+
+volumes:
+  pgdata:

@@ -100,5 +100,68 @@ once they know how.
 
 ---
 
+## V04A — Identification and Authentication Failures: No Login Rate Limiting
+
+1. **Vulnerability ID:** V04A
+2. **Vulnerability name:** Missing rate limiting / brute-force protection on login
+3. **OWASP category:** A07:2021 – Identification and Authentication Failures
+4. **Feature:** Login
+5. **API endpoint:** `POST /api/auth/login`
+6. **Vulnerable code location:** `backend/src/routes/authRoutes.ts` — no throttling middleware is mounted in front of the login route.
+7. **What the normal user does:** Occasionally mistypes their password once or twice, then logs in successfully.
+8. **What the security tester changes:** Scripts repeated `POST /api/auth/login` requests against one account with different passwords (a small, local, non-destructive test — the lab does not ship an automated credential-attack tool; the point is to observe that the server never pushes back).
+9. **Expected vulnerable behavior:** Every attempt returns a normal `401` at full speed — no `429 Too Many Requests`, no delay, no temporary lockout, no CAPTCHA. Ten failed attempts in a row behave identically to one.
+10. **Why the vulnerability exists:** The route has no rate-limiting or account-lockout middleware at all, so nothing bounds how many password guesses per second an attacker can send.
+11. **Secured implementation:** `secured` branch adds a rate-limiting middleware (e.g. `express-rate-limit`) in front of `POST /api/auth/login`, keyed by IP (and optionally by the submitted email), returning `429` once a short window's attempt budget is exceeded.
+12. **How the remediation works:** Bounding the request rate makes online brute-forcing impractically slow without meaningfully affecting a legitimate user who mistypes their password a couple of times.
+13. **How to verify the fix:** Repeat the same rapid-fire login-attempt test; expect the responses to switch to `429` after the configured threshold instead of `401` indefinitely.
+14. **Tools that may detect it:** OWASP ZAP's active scan includes brute-force/authentication tests; manual scripting (a small curl/Postman loop, as above) is the most direct way to see it.
+15. **Best detection approach:** Manual/DAST testing — this is an operational/runtime behavior, not something SAST can see by reading code (absence of a middleware is hard to flag reliably by pattern-matching alone).
+16. **Suggested AI prompts:** See `AI_SECURITY_PROMPTS.md`, section "V04A".
+
+---
+
+## V04B — Identification and Authentication Failures: Username Enumeration
+
+1. **Vulnerability ID:** V04B
+2. **Vulnerability name:** Username/account enumeration via differing login error messages
+3. **OWASP category:** A07:2021 – Identification and Authentication Failures
+4. **Feature:** Login
+5. **API endpoint:** `POST /api/auth/login`
+6. **Vulnerable code location:** `backend/src/controllers/authController.ts`, function `login`
+7. **What the normal user does:** Enters their email and password and either logs in or sees a generic "that didn't work" message.
+8. **What the security tester changes:** Submits a login with an email that is not registered, then submits a login with a known-registered email (e.g. `rahul@test.com`) and a wrong password. Compares the two error messages.
+9. **Expected vulnerable behavior:** Unknown email → `{"error":"User does not exist"}`. Known email, wrong password → `{"error":"Incorrect password"}`. The two distinct messages let an attacker script a list of candidate emails and learn exactly which ones have accounts, without ever guessing a correct password.
+10. **Why the vulnerability exists:** The handler branches on "user not found" vs "password mismatch" and returns a different, specific message for each case, prioritizing a (seemingly) more helpful error over not leaking account existence.
+11. **Secured implementation:** `secured` branch, same file/function. Both the "unknown email" and "wrong password" branches return the identical generic message and status: `{"error":"Invalid email or password"}` with `401`.
+12. **How the remediation works:** Since both failure cases are indistinguishable to the caller, an attacker cannot tell whether a given email exists in the system at all, closing the enumeration channel.
+13. **How to verify the fix:** Repeat both requests from step 8 and confirm both now return the exact same `401` body.
+14. **Tools that may detect it:** Manual testing (comparing two responses) is the standard technique; ZAP's passive scan can sometimes flag "user enumeration" if response differences are configured as a scan rule, but manual confirmation is more reliable here.
+15. **Best detection approach:** Manual testing — this is a response-content comparison a scanner can approximate but a human (or a simple scripted diff) confirms definitively.
+16. **Suggested AI prompts:** See `AI_SECURITY_PROMPTS.md`, section "V04B".
+
+---
+
+## V04C — Identification and Authentication Failures: Logout Does Not Invalidate the Token
+
+1. **Vulnerability ID:** V04C
+2. **Vulnerability name:** Session/token logout failure (token remains valid after logout)
+3. **OWASP category:** A07:2021 – Identification and Authentication Failures
+4. **Feature:** Logout
+5. **API endpoint:** `POST /api/auth/logout`
+6. **Vulnerable code location:** `backend/src/controllers/authController.ts`, function `logout`
+7. **What the normal user does:** Clicks "Logout" in the nav bar; the frontend clears its local token and the app returns to the login screen.
+8. **What the security tester changes:** Captures the JWT before logging out (e.g. from browser DevTools → Application → Local Storage, or from the login response in Postman), calls logout, then **replays the captured token** directly against a protected endpoint like `GET /api/orders` instead of trusting the UI.
+9. **Expected vulnerable behavior:** `POST /api/auth/logout` returns `{"message":"Logged out successfully"}`, but the replayed token still returns `200` with the user's real order data — the token was never actually invalidated server-side, only removed from the browser's local storage.
+10. **Why the vulnerability exists:** The `logout` handler returns a success message without writing anything to the `revoked_tokens` table. The `authenticate` middleware does check that table on every request (see `backend/src/middleware/auth.ts`), but since logout never adds a row, the check always finds nothing and the JWT stays valid until it naturally expires (`JWT_EXPIRES_IN`, 2 hours by default).
+11. **Secured implementation:** `secured` branch, same file/function. `logout` inserts the token into `revoked_tokens` (`INSERT INTO revoked_tokens (token, user_id, revoked_at) VALUES ($1, $2, NOW())`) before responding.
+12. **How the remediation works:** `authenticate` already rejects any token found in `revoked_tokens` with `401`. Once logout actually records the revocation, the very next request with that token is rejected, regardless of the JWT's own expiry.
+13. **How to verify the fix:** Repeat the capture-token → logout → replay-token sequence; expect the replayed request to return `401 {"error":"Session has been logged out"}` instead of `200`.
+14. **Tools that may detect it:** Manual testing (capture + replay, as above) or a scripted Postman/Newman collection. Not something SAST or a generic DAST crawl reliably catches, since it requires understanding the login → logout → reuse *sequence*, not a single request in isolation.
+15. **Best detection approach:** Manual testing — session-lifecycle bugs like this require modeling a multi-step flow, which is a strength of human/manual testing over automated scanning.
+16. **Suggested AI prompts:** See `AI_SECURITY_PROMPTS.md`, section "V04C".
+
+---
+
 *(Further vulnerabilities are appended below as they are introduced on the
 `vulnerable` branch.)*

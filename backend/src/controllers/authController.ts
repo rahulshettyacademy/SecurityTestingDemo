@@ -41,16 +41,18 @@ export async function login(req: Request, res: Response): Promise<void> {
   const result = await pool.query("SELECT id, name, email, password, role FROM users WHERE email = $1", [email]);
   const user = result.rows[0];
 
-  const genericError = () => res.status(401).json({ error: "Invalid email or password" });
-
+  // SECURITY-LAB-VULNERABILITY: V04B - Username enumeration
+  // Returning a different message for "unknown email" vs "wrong password"
+  // lets an attacker enumerate valid accounts by trying many emails and
+  // watching which error text comes back, without ever knowing a password.
   if (!user) {
-    genericError();
+    res.status(401).json({ error: "User does not exist" });
     return;
   }
 
   const passwordMatches = await bcrypt.compare(password, user.password);
   if (!passwordMatches) {
-    genericError();
+    res.status(401).json({ error: "Incorrect password" });
     return;
   }
 
@@ -68,10 +70,10 @@ export async function logout(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  // Recording the token as revoked is what makes it stop working after logout.
-  await pool.query(
-    "INSERT INTO revoked_tokens (token, user_id, revoked_at) VALUES ($1, $2, NOW()) ON CONFLICT DO NOTHING",
-    [token, req.user.userId]
-  );
+  // SECURITY-LAB-VULNERABILITY: V04C - Session/token logout failure
+  // This endpoint reports success but never records the token as revoked
+  // (no INSERT into revoked_tokens). The JWT stays valid and usable on every
+  // protected endpoint until it naturally expires (JWT_EXPIRES_IN), even
+  // though the UI shows the user as logged out.
   res.json({ message: "Logged out successfully" });
 }

@@ -34,6 +34,7 @@ once they know how.
 14. **Tools that may detect it:** OWASP ZAP (via authenticated active scan comparing two user sessions) can flag this with its access-control testing add-ons, but reliably catching IDOR is still mostly a **manual/logic** exercise — Burp Suite's Autorize extension or a scripted Postman/Newman collection that replays one user's requests with another user's token is the standard approach.
 15. **Best detection approach:** Manual testing (primary) — this is a logic flaw, not a pattern SAST/SCA can see. DAST can assist if configured with two authenticated sessions to diff responses.
 16. **Suggested AI prompts:** See `AI_SECURITY_PROMPTS.md`, section "V01".
+17. **Security regression test:** `security-tests/tests/v01-idor.test.ts`
 
 ---
 
@@ -55,6 +56,7 @@ once they know how.
 14. **Tools that may detect it:** Same as V01 — manual testing or an authenticated ZAP/Burp scan comparing responses across roles. A code-level SAST rule (Semgrep) can also be written to flag admin routers that call `authenticate` without `requireAdmin`, since this is a structural pattern.
 15. **Best detection approach:** Manual testing (primary), SAST as a secondary structural check (a Semgrep rule can catch "admin route missing role middleware" reliably since it's a code pattern, unlike V01's data-level check).
 16. **Suggested AI prompts:** See `AI_SECURITY_PROMPTS.md`, section "V01B".
+17. **Security regression test:** `security-tests/tests/v01b-vertical-privilege.test.ts`
 
 ---
 
@@ -76,6 +78,7 @@ once they know how.
 14. **Tools that may detect it:** Semgrep (rule pattern: SQL built via template literal / string concatenation passed to a query function) reliably flags this at the **source-code** level. SQLMap or ZAP's active scan can confirm it **dynamically** by fuzzing the `name` parameter.
 15. **Best detection approach:** SAST (Semgrep) is the fastest way to catch this class of bug before it ships; manual/DAST testing (the quote-probe technique above) is how a QA engineer without source access would find it.
 16. **Suggested AI prompts:** See `AI_SECURITY_PROMPTS.md`, section "V02".
+17. **Security regression test:** `security-tests/tests/v02-sql-injection.test.ts`
 
 ---
 
@@ -97,6 +100,7 @@ once they know how.
 14. **Tools that may detect it:** Semgrep has a built-in rule for `dangerouslySetInnerHTML` usage (flags it as a potential XSS sink regardless of whether the data is sanitized). OWASP ZAP's active scan can detect reflected/stored XSS patterns but works best combined with manual confirmation, since it can't always tell a false positive from real script execution.
 15. **Best detection approach:** SAST (Semgrep) is the fastest way to catch `dangerouslySetInnerHTML` usage at review time; manual testing (submit a payload, reopen the page, watch for execution) is how a QA engineer verifies real-world impact.
 16. **Suggested AI prompts:** See `AI_SECURITY_PROMPTS.md`, section "V03".
+17. **Security regression test:** `tests/playwright/xss-regression.spec.ts` (Playwright, not `security-tests/` — this is a frontend-only bug, so there is no API-level difference between branches for Supertest to assert on).
 
 ---
 
@@ -118,6 +122,7 @@ once they know how.
 14. **Tools that may detect it:** OWASP ZAP's active scan includes brute-force/authentication tests; manual scripting (a small curl/Postman loop, as above) is the most direct way to see it.
 15. **Best detection approach:** Manual/DAST testing — this is an operational/runtime behavior, not something SAST can see by reading code (absence of a middleware is hard to flag reliably by pattern-matching alone).
 16. **Suggested AI prompts:** See `AI_SECURITY_PROMPTS.md`, section "V04A".
+17. **Security regression test:** `security-tests/tests/v04a-rate-limit.test.ts`
 
 ---
 
@@ -139,6 +144,7 @@ once they know how.
 14. **Tools that may detect it:** Manual testing (comparing two responses) is the standard technique; ZAP's passive scan can sometimes flag "user enumeration" if response differences are configured as a scan rule, but manual confirmation is more reliable here.
 15. **Best detection approach:** Manual testing — this is a response-content comparison a scanner can approximate but a human (or a simple scripted diff) confirms definitively.
 16. **Suggested AI prompts:** See `AI_SECURITY_PROMPTS.md`, section "V04B".
+17. **Security regression test:** `security-tests/tests/v04b-username-enumeration.test.ts`
 
 ---
 
@@ -160,6 +166,7 @@ once they know how.
 14. **Tools that may detect it:** Manual testing (capture + replay, as above) or a scripted Postman/Newman collection. Not something SAST or a generic DAST crawl reliably catches, since it requires understanding the login → logout → reuse *sequence*, not a single request in isolation.
 15. **Best detection approach:** Manual testing — session-lifecycle bugs like this require modeling a multi-step flow, which is a strength of human/manual testing over automated scanning.
 16. **Suggested AI prompts:** See `AI_SECURITY_PROMPTS.md`, section "V04C".
+17. **Security regression test:** `security-tests/tests/v04c-logout-invalidation.test.ts`
 
 ---
 
@@ -181,6 +188,7 @@ once they know how.
 14. **Tools that may detect it:** Manual DB inspection is definitive. Semgrep can flag the *absence* of a hashing call in an auth-related INSERT/UPDATE as a heuristic, but that's noisy; this is fundamentally something you confirm by looking at the stored value.
 15. **Best detection approach:** Manual testing / direct database inspection — this is the clearest way to demonstrate the impact to students, and is also exactly the audit step a real security review would take.
 16. **Suggested AI prompts:** See `AI_SECURITY_PROMPTS.md`, section "V05".
+17. **Security regression test:** `security-tests/tests/v05-password-hashing.test.ts`
 
 ---
 
@@ -190,19 +198,22 @@ once they know how.
 2. **Vulnerability name:** Verbose error responses (stack traces, DB errors, and source file paths returned to the client) — V06A and V06C are documented together because they are the same root cause: this app's error handling was left in a "development-friendly" state everywhere, not just in one place.
 3. **OWASP category:** A05:2021 – Security Misconfiguration
 4. **Feature:** No single UI feature — this is a cross-cutting backend behavior that affects *any* endpoint that throws an unhandled error.
-5. **API endpoint:** Any — most easily reproduced via the V02 SQL Injection trigger, `GET /api/products/search?name=test'`.
+5. **API endpoint:** Any — two independent triggers are documented below; either works, and using both makes a nice teaching point about defense in depth.
 6. **Vulnerable code location:** `backend/src/middleware/errorHandler.ts`
 7. **What the normal user does:** Nothing special — normal requests never hit the error path.
-8. **What the security tester changes:** Sends a request designed to make the backend throw (a raw DB syntax error via V02's quote-trigger is the easiest, but any unhandled `Error` anywhere in the app takes the same path).
-9. **Expected vulnerable behavior:** Instead of a generic `500`, the JSON response includes: the raw error message (a real Postgres error in this case, e.g. `"unterminated quoted string at or near ..."`), the Postgres error `code` (`42601`), and a full `stack` trace that names the exact source file and line (`/app/src/controllers/productController.ts:21:18`) plus internal library frames (`pg-pool`). This hands an attacker a roadmap of your stack, file layout, and exact failure point — and, as seen here, amplifies whatever *other* bug triggered the error (V02 becomes much easier to exploit once you can see the database's own error text).
+8. **What the security tester changes:** Sends a request designed to make the backend throw. Two independent ways to do this:
+   - **Combined with V02** (on the `vulnerable` branch only, where V02 is still present): the SQL Injection quote-trigger, `GET /api/products/search?name=test'`, causes a raw DB syntax error — a great example of one misconfiguration amplifying another bug.
+   - **Standalone, on either branch:** `GET /api/products/99999999999` — a syntactically valid number that exceeds Postgres's `integer` range, so the database itself throws regardless of whether V02 is fixed. This is the trigger the automated regression test uses, since it needs to work on the `secured` branch where V02 no longer errors.
+9. **Expected vulnerable behavior:** Instead of a generic `500`, the JSON response includes: the raw error message (a real Postgres error, e.g. `"value out of range for type integer"` or `"unterminated quoted string at or near ..."`), the Postgres error `code`, and a full `stack` trace that names the exact source file and line (e.g. `/app/src/controllers/productController.ts:29:18`) plus internal library frames (`pg-pool`). This hands an attacker a roadmap of your stack, file layout, and exact failure point.
 10. **Why the vulnerability exists:** `errorHandler` checks `NODE_ENV` and includes full error detail whenever it is not exactly `"production"` — and this lab's default `NODE_ENV` is `"development"` (see `docker-compose.yml` / `.env.example`), so verbose output is on by default, exactly as it would be if a real team forgot to set `NODE_ENV=production` before deploying.
     > **A note on why this isn't the same as the forbidden `LAB_MODE` toggle:** the spec for this course explicitly disallows using an environment variable to switch between an entirely separate "vulnerable implementation" and "secure implementation." That's not what's happening here — `NODE_ENV`-driven error verbosity *is itself* the vulnerability being taught (A05: "Security Misconfiguration — Development Configuration"), not a shortcut used to avoid writing a vulnerable/secure code pair. The `secured` branch's error handler is a genuinely different function that never includes stack/DB detail, regardless of `NODE_ENV` — there is no flag that "unlocks" secure behavior. The env var here is *input the vulnerable code reacts to*, the same way V02's vulnerability reacts to the `name` query parameter.
 11. **Secured implementation:** `secured` branch, same file. The handler always returns the generic `{"error":"Something went wrong. Please try again later."}` with `500`, regardless of `NODE_ENV`. The real error is still logged server-side via `console.error` for developers/operators to see in the container logs — it just never reaches the HTTP response.
 12. **How the remediation works:** Diagnostic detail (stack traces, DB errors, file paths) is operationally useful but should only ever be visible to people with access to server logs, never to an HTTP client. Removing the `NODE_ENV` branch entirely closes the leak in every environment, including a misconfigured one.
-13. **How to verify the fix:** Repeat the `?name=test'` request; expect the generic message only, and confirm the real error still appears in `docker compose logs backend`.
+13. **How to verify the fix:** Repeat `GET /api/products/99999999999`; expect only `{"error":"Something went wrong. Please try again later."}`, and confirm the real error still appears in `docker compose logs backend` (or the terminal running `npm run dev`).
 14. **Tools that may detect it:** OWASP ZAP's passive scan flags stack traces and verbose error disclosure automatically once it sees one in a response. Manual testing (triggering an error and reading the body) is equally effective and requires no tooling.
 15. **Best detection approach:** DAST (ZAP passive scan) is very reliable here since verbose errors are a recognizable response pattern; manual testing confirms it directly.
 16. **Suggested AI prompts:** See `AI_SECURITY_PROMPTS.md`, section "V06A".
+17. **Security regression test:** `security-tests/tests/v06a-verbose-errors.test.ts`
 
 ---
 
@@ -224,6 +235,7 @@ once they know how.
 14. **Tools that may detect it:** OWASP ZAP's spider/active scan can surface forgotten endpoints if they're reachable from a crawlable path (this one isn't linked anywhere, so a scanner would need a wordlist/fuzzing approach, e.g. ZAP's forced browse add-on). Manual API-path guessing is the direct approach here.
 15. **Best detection approach:** DAST with forced-browsing/content-discovery (ZAP's forced browse, or a tool like `ffuf`/`gobuster` against `/api/*`), since this endpoint is unlinked and won't appear from normal crawling or manual UI exploration alone.
 16. **Suggested AI prompts:** See `AI_SECURITY_PROMPTS.md`, section "V06B".
+17. **Security regression test:** `security-tests/tests/v06b-debug-endpoint.test.ts`
 
 ---
 
@@ -245,6 +257,7 @@ once they know how.
 14. **Tools that may detect it:** This is very hard for any automated scanner (SAST, DAST, or SCA) to catch reliably, because the request is syntactically and semantically valid — nothing about it looks malformed or "attack-shaped." A DAST tool has no way to know ₹1 is "wrong" for this product.
 15. **Best detection approach:** Manual testing exclusively — a QA engineer who understands the business rule ("price must come from the catalog, not the request") is the only reliable way to catch this class of bug. This is a great example for teaching students *why* manual testing and threat modeling remain essential even with good scanner coverage.
 16. **Suggested AI prompts:** See `AI_SECURITY_PROMPTS.md`, section "V07".
+17. **Security regression test:** `security-tests/tests/v07-price-manipulation.test.ts`
 
 ---
 
@@ -266,8 +279,11 @@ once they know how.
 14. **Tools that may detect it:** `npm audit` (built into npm), GitHub Dependabot, Snyk, or any other SCA tool pointed at `labs/supply-chain-demo/package-lock.json`.
 15. **Best detection approach:** SCA exclusively — this is a dependency-metadata problem, not something manual testing, SAST, or DAST would typically surface (the vulnerable code lives inside the third-party package, not anything this project wrote).
 16. **Suggested AI prompts:** See `AI_SECURITY_PROMPTS.md`, section "V08".
+17. **Security regression test:** None (Jest can't meaningfully assert on an `npm audit` report) — the regression check is simply re-running `npm install && npm audit` in `labs/supply-chain-demo/` and confirming 0 vulnerabilities.
 
 ---
 
-*(Further vulnerabilities are appended below as they are introduced on the
-`vulnerable` branch.)*
+This guide covers all 10 intentional vulnerabilities in RSA SecureShop (V01
+through V08, with V01/V04/V06 each covering two closely related issues). See
+`VULNERABILITY_MAP.md` for the master index and `BRANCH_COMPARISON.md` for
+how to diff `vulnerable` against `secured` file by file.

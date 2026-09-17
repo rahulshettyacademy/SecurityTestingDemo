@@ -34,11 +34,11 @@ export async function getOrderById(req: Request, res: Response): Promise<void> {
 
   const order = orderResult.rows[0];
 
-  // Ownership check: a customer may only view their own orders. Admins may view any order.
-  if (order.user_id !== req.user!.userId && req.user!.role !== "ADMIN") {
-    res.status(403).json({ error: "You do not have access to this order" });
-    return;
-  }
+  // SECURITY-LAB-VULNERABILITY: V01 - Broken Access Control (Insecure Direct Object Reference)
+  // This handler checks that the caller is authenticated (see authenticate middleware
+  // in orderRoutes.ts) but never verifies that order.user_id matches req.user.userId.
+  // Any logged-in customer can read any other customer's order by changing the
+  // numeric :orderId in the URL, e.g. GET /api/orders/1002 while logged in as Rahul.
 
   const itemsResult = await pool.query(
     `SELECT oi.id, oi.product_id, p.name AS product_name, oi.quantity, oi.unit_price

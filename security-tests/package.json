@@ -1,0 +1,19 @@
+{
+  "name": "rsa-secureshop-security-tests",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Security regression tests for RSA SecureShop. Intended to validate the secured branch - imports the backend app in-process and asserts each vulnerability's fix.",
+  "scripts": {
+    "test": "jest --runInBand"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.12",
+    "@types/pg": "^8.11.6",
+    "@types/supertest": "^6.0.2",
+    "jest": "^29.7.0",
+    "pg": "^8.11.5",
+    "supertest": "^7.0.0",
+    "ts-jest": "^29.1.5",
+    "typescript": "^5.5.3"
+  }
+}

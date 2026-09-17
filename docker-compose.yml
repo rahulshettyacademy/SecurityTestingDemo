@@ -10,7 +10,12 @@ services:
       - pgdata:/var/lib/postgresql/data
       - ./database/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
       - ./database/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
-    # No ports published: PostgreSQL stays on the internal Docker network only.
+    ports:
+      # Bound to localhost only - same principle as backend/frontend below.
+      # Never published to 0.0.0.0/a public interface. This exists so local
+      # tooling (security-tests, psql, a GUI DB client) can reach Postgres
+      # directly for verification without going through `docker compose exec`.
+      - "127.0.0.1:5432:5432"
     networks:
       - secureshop-net
     healthcheck:

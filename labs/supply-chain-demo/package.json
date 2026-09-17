@@ -1,0 +1,12 @@
+{
+  "name": "rsa-secureshop-supply-chain-demo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Isolated SCA / npm-audit teaching lab. NOT part of the main RSA SecureShop application - nothing here is installed, built, or run by docker-compose.",
+  "scripts": {
+    "demo": "node merge-preferences.js"
+  },
+  "dependencies": {
+    "lodash": "4.17.15"
+  }
+}

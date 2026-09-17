@@ -248,5 +248,26 @@ once they know how.
 
 ---
 
+## V08 — Vulnerable and Outdated Components: Supply Chain / SCA Demo
+
+1. **Vulnerability ID:** V08
+2. **Vulnerability name:** Outdated dependency with publicly documented vulnerabilities (`lodash@4.17.15`)
+3. **OWASP category:** A06:2021 – Vulnerable and Outdated Components
+4. **Feature:** None in the running application — this is an isolated Software Composition Analysis (SCA) lab, not wired into RSA SecureShop's UI or API in any way.
+5. **API endpoint:** N/A
+6. **Vulnerable code location:** `labs/supply-chain-demo/package.json`
+7. **What the normal user does:** N/A — nothing in the running application uses this folder.
+8. **What the security tester changes:** Runs `cd labs/supply-chain-demo && npm install && npm audit` instead of interacting with the app at all.
+9. **Expected vulnerable behavior:** `npm audit` reports a high-severity finding against `lodash <=4.17.23`, listing several real GitHub Security Advisories (prototype pollution, command injection, ReDoS — see `labs/supply-chain-demo/README.md` for the full report captured at build time).
+10. **Why the vulnerability exists:** `package.json` pins `lodash` to `4.17.15`, an old version that predates the fixes for those advisories. This is deliberately isolated under `labs/` specifically so it never becomes part of `backend/` or `frontend/`'s real dependency tree — `npm audit` against the *main* application returns 0 vulnerabilities.
+11. **Secured implementation:** `secured` branch's copy of `labs/supply-chain-demo/package.json` pins `lodash` to the current patched release (`^4.18.1` at the time of writing — see the lab's README for how to find the latest).
+12. **How the remediation works:** The patched version includes fixes for the known advisories; `npm audit` against the upgraded `package.json`/lockfile reports 0 vulnerabilities.
+13. **How to verify the fix:** Re-run `npm install && npm audit` after the version bump; confirm the report is clean.
+14. **Tools that may detect it:** `npm audit` (built into npm), GitHub Dependabot, Snyk, or any other SCA tool pointed at `labs/supply-chain-demo/package-lock.json`.
+15. **Best detection approach:** SCA exclusively — this is a dependency-metadata problem, not something manual testing, SAST, or DAST would typically surface (the vulnerable code lives inside the third-party package, not anything this project wrote).
+16. **Suggested AI prompts:** See `AI_SECURITY_PROMPTS.md`, section "V08".
+
+---
+
 *(Further vulnerabilities are appended below as they are introduced on the
 `vulnerable` branch.)*

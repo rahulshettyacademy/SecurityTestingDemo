@@ -1,0 +1,206 @@
+name: Security Pipeline
+
+# Teaching flow this workflow implements:
+#   Build -> Functional checks -> SAST -> SCA -> Security regression tests
+#   -> Security gate -> (deployment decision, not automated here)
+#
+# Branch-aware by design: the `vulnerable` branch is SUPPOSED to fail its
+# security checks (that's the whole point of the course), so this workflow
+# never fails CI because of an intentional vulnerability on that branch.
+# Jobs that assert "no vulnerabilities" only gate the `secured` branch;
+# on `vulnerable` the same jobs still run and their findings are visible in
+# the logs, just non-blocking.
+
+on:
+  push:
+    branches: [main, vulnerable, secured]
+  pull_request:
+    branches: [main, vulnerable, secured]
+  workflow_dispatch:
+
+jobs:
+  build-and-typecheck:
+    name: Build & typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Backend - install
+        run: npm ci
+        working-directory: backend
+
+      - name: Backend - typecheck
+        run: npx tsc -p tsconfig.json --noEmit
+        working-directory: backend
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Frontend - install
+        run: npm ci
+        working-directory: frontend
+
+      - name: Frontend - build
+        run: npm run build
+        working-directory: frontend
+
+  sca-audit:
+    name: SCA - npm audit (backend/frontend)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Backend audit
+        run: npm ci && npm audit --audit-level=high
+        working-directory: backend
+
+      - name: Frontend audit
+        run: npm ci && npm audit --audit-level=high
+        working-directory: frontend
+
+  supply-chain-demo-audit:
+    name: SCA - npm audit (labs/supply-chain-demo, informational)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Audit isolated supply-chain lab
+        # Always non-blocking: on `vulnerable` this is EXPECTED to report a
+        # finding (that's V08's entire point); on `secured` it should be
+        # clean. Either way it must never fail the pipeline.
+        run: npm install && npm audit
+        working-directory: labs/supply-chain-demo
+        continue-on-error: true
+
+  sast-semgrep:
+    name: SAST - Semgrep
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Semgrep
+        run: pip install semgrep
+
+      - name: Run custom + registry rules
+        id: semgrep
+        # Blocking only on secured (see header comment). On vulnerable this
+        # is expected to report findings for V02/V03/V05 - visible in the
+        # job log, but never fails the build.
+        continue-on-error: ${{ github.ref_name != 'secured' }}
+        run: |
+          semgrep --config .semgrep/rsa-secureshop-rules.yml \
+                  --config p/owasp-top-ten \
+                  --error \
+                  backend/src frontend/src
+
+  secret-scan:
+    name: Secret scanning - gitleaks (informational)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        continue-on-error: true # the repo intentionally contains one fake demo secret - see .gitleaks.toml
+        env:
+          GITLEAKS_CONFIG: .gitleaks.toml
+
+  security-regression-tests:
+    name: Security regression tests (secured branch only)
+    runs-on: ubuntu-latest
+    if: github.ref_name == 'secured'
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: secureshop
+          POSTGRES_PASSWORD: secureshop_dev_password
+          POSTGRES_DB: secureshop
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U secureshop"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Seed database
+        run: |
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+          PGPASSWORD=secureshop_dev_password psql -h 127.0.0.1 -U secureshop -d secureshop -f database/init.sql
+          PGPASSWORD=secureshop_dev_password psql -h 127.0.0.1 -U secureshop -d secureshop -f database/seed.sql
+
+      - name: Install backend deps (imported in-process by the tests)
+        run: npm ci
+        working-directory: backend
+
+      - name: Install security-tests deps
+        run: npm ci
+        working-directory: security-tests
+
+      - name: Run security regression tests
+        run: npm test
+        working-directory: security-tests
+        env:
+          DB_HOST: 127.0.0.1
+
+  xss-regression-e2e:
+    name: Playwright - V03 XSS regression (secured branch only)
+    runs-on: ubuntu-latest
+    if: github.ref_name == 'secured'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Start full stack
+        run: docker compose up -d --build
+
+      - name: Wait for services
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:5000/api/health && break
+            sleep 2
+          done
+
+      - name: Install Playwright
+        run: npm ci
+        working-directory: tests/playwright
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: tests/playwright
+
+      - name: Run XSS regression test
+        run: npm test
+        working-directory: tests/playwright
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

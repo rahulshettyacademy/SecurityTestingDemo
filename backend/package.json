@@ -9,8 +9,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "lint": "eslint \"src/**/*.ts\"",
-    "test": "jest --runInBand",
-    "test:security": "jest --config jest.security.config.js --runInBand"
+    "test": "jest --runInBand"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",

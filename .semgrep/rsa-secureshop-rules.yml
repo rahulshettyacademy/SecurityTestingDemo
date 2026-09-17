@@ -1,0 +1,80 @@
+# RSA SecureShop custom Semgrep rules.
+#
+# Run: semgrep --config .semgrep/rsa-secureshop-rules.yml backend/src frontend/src
+#
+# These rules are hand-written for THIS repo's specific vulnerabilities and
+# are deliberately narrow. They exist alongside (not instead of) Semgrep's
+# free registry rulesets - `semgrep --config p/owasp-top-ten --config
+# p/security-audit` - which, notably, find ZERO issues in this codebase even
+# on the vulnerable branch. That's an intentional, honest teaching point:
+# generic default rulesets are tuned for extremely common frameworks and
+# anti-patterns, and will miss plenty of real, hand-written bugs. Custom
+# rules (or an AI-assisted review - see AI_SECURITY_PROMPTS.md) are often
+# what actually catches an application's own logic bugs.
+#
+# Expected result on the `vulnerable` branch: 3 findings.
+# Expected result on the `secured` branch: 0 findings.
+rules:
+  - id: sql-injection-template-literal
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >-
+      SQL query built via a template literal with string interpolation
+      instead of a parameterized query placeholder. User input can escape
+      the intended string and change the query's structure (SQL Injection,
+      OWASP A03:2021). Use a parameterized query instead, e.g.
+      pool.query("... WHERE name ILIKE $1 ...", [value]).
+    metadata:
+      owasp: "A03:2021 - Injection"
+      course-vulnerability: V02
+    patterns:
+      - pattern-either:
+          - pattern: $POOL.query(`...${$X}...`)
+          - pattern: $CLIENT.query(`...${$X}...`)
+    # Note: this precise AST pattern does NOT match this repo's actual V02
+    # code, because the query is built in a variable first
+    # (`const query = \`...\`; pool.query(query)`), not passed inline. Kept
+    # here anyway as a genuinely useful rule for the (very common) direct
+    # form. The broader regex rule below is what actually catches this
+    # repo's version - see the comment on that rule.
+
+  - id: sql-injection-template-literal-broad
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >-
+      A SQL-shaped template literal with string interpolation was found
+      (matched by text, not just direct call-site usage - this also catches
+      the query being built in a variable before being passed to .query()).
+      Verify the interpolated value is never attacker-controlled without
+      parameterization (OWASP A03:2021 - Injection).
+    metadata:
+      owasp: "A03:2021 - Injection"
+      course-vulnerability: V02
+    pattern-regex: '`[^`]*SELECT[^`]*\$\{[^}]+\}[^`]*`'
+
+  - id: react-dangerously-set-inner-html
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >-
+      dangerouslySetInnerHTML renders raw HTML without React's default
+      escaping. If the content includes unsanitized user input, this is a
+      Stored/Reflected XSS sink (OWASP A03:2021). Render as plain text
+      ({value}) or sanitize with a library like DOMPurify first.
+    metadata:
+      owasp: "A03:2021 - Injection (XSS)"
+      course-vulnerability: V03
+    pattern: '<$TAG dangerouslySetInnerHTML={{ __html: $X }} ... />'
+
+  - id: plaintext-password-comparison
+    languages: [typescript, javascript]
+    severity: WARNING
+    message: >-
+      Comparing a password with strict equality (===) instead of a hashed
+      comparison (e.g. bcrypt.compare) strongly suggests the password is
+      stored in plaintext (OWASP A02:2021 - Cryptographic Failures).
+    metadata:
+      owasp: "A02:2021 - Cryptographic Failures"
+      course-vulnerability: V05
+    patterns:
+      - pattern: $PASSWORD === $USER.password
+      - pattern-not: $PASSWORD === $USER.passwordHash

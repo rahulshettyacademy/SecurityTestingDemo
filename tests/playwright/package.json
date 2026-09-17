@@ -1,0 +1,12 @@
+{
+  "name": "rsa-secureshop-e2e",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Playwright end-to-end / regression tests for RSA SecureShop. Assumes the app is already running (docker compose up) at http://127.0.0.1:3000 / :5000.",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
+  }
+}

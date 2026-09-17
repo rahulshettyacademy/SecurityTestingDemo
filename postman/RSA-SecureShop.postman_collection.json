@@ -1,0 +1,373 @@
+{
+  "info": {
+    "name": "RSA SecureShop — Vulnerability Demos",
+    "description": "One request set, two branches. How to use: `git checkout vulnerable`, `docker compose down -v && docker compose up --build`, run '0. Setup' once, then run whichever vulnerability folder you're teaching and note the response. Then `git checkout secured`, `docker compose down -v && docker compose up --build`, run '0. Setup' again, and re-run the same folder — compare the two responses. See postman/README.md in the repo for the full walkthrough and the expected result for every request.\n\nIMPORTANT - rate limiter interaction: on the secured branch, POST /api/auth/login is limited to 5 requests/minute/IP (that's the V04A fix, and it counts every call to that route, success or failure, including the three Setup logins). Live in class, with real explanation time between folders, you will never hit this. But Setup (3 logins) plus V04B (2 more login attempts) alone already equals 5 - so if you fire the whole collection in one rapid automated pass (e.g. rehearsing with Postman's Collection Runner or Newman with no delay), V04C's login will be the 6th call and gets legitimately blocked with 429, cascading into unrelated 401s through the rest of V04C. That's the rate limiter correctly doing its job under rapid-fire conditions it wasn't designed for, not a bug in this collection - it's actually a nice live illustration of how tight a rate limit can bite even a legitimate rapid workflow. If you want a clean rapid rehearsal run, add a Collection Runner delay of a few seconds between requests, or just wait 60 seconds and re-run '0. Setup' before continuing. V04A itself (which deliberately burns through the budget on purpose) is placed last so it doesn't disrupt anything before it.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://127.0.0.1:5000/api" },
+    { "key": "rahul_token", "value": "" },
+    { "key": "priya_token", "value": "" },
+    { "key": "admin_token", "value": "" },
+    { "key": "rahul_token_v04c", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "0. Setup — Login & Capture Tokens",
+      "description": "Run these three requests once, top to bottom, right after `docker compose up`. They log in the three seeded accounts and save each token into a collection variable used by the folders below. Re-run this whole folder any time you switch branches and rebuild, since a fresh docker compose down -v wipes the database and old tokens stop working (or, on the secured branch, some may have been intentionally revoked by the V04C folder).",
+      "item": [
+        {
+          "name": "Login as Rahul (customer)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"rahul@test.com\",\n  \"password\": \"Rahul123!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('login succeeded', () => pm.response.to.have.status(200));",
+                  "const rahulLoginData = pm.response.json();",
+                  "pm.collectionVariables.set('rahul_token', rahulLoginData.token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login as Priya (customer)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"priya@test.com\",\n  \"password\": \"Priya123!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('login succeeded', () => pm.response.to.have.status(200));",
+                  "const priyaLoginData = pm.response.json();",
+                  "pm.collectionVariables.set('priya_token', priyaLoginData.token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login as Admin",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@test.com\",\n  \"password\": \"Admin123!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('login succeeded', () => pm.response.to.have.status(200));",
+                  "const adminLoginData = pm.response.json();",
+                  "pm.collectionVariables.set('admin_token', adminLoginData.token);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "V01 - Broken Access Control (IDOR)",
+      "description": "Vulnerable branch: request 2 returns 200 with Priya's real order data. Secured branch: request 2 returns 403.",
+      "item": [
+        {
+          "name": "1. Rahul views his own order (1001) — control",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{rahul_token}}" }],
+            "url": "{{base_url}}/orders/1001"
+          }
+        },
+        {
+          "name": "2. Rahul views Priya's order (1002) — IDOR check",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{rahul_token}}" }],
+            "url": "{{base_url}}/orders/1002"
+          }
+        }
+      ]
+    },
+    {
+      "name": "V01B - Vertical Privilege Escalation",
+      "description": "Vulnerable branch: request 1 returns 200 with the full user list, even though Rahul is a CUSTOMER. Secured branch: request 1 returns 403. Request 2 is a control and should return 200 on both branches.",
+      "item": [
+        {
+          "name": "1. Rahul (customer) lists all users — role check",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{rahul_token}}" }],
+            "url": "{{base_url}}/admin/users"
+          }
+        },
+        {
+          "name": "2. Admin lists all users — control",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{admin_token}}" }],
+            "url": "{{base_url}}/admin/users"
+          }
+        }
+      ]
+    },
+    {
+      "name": "V02 - SQL Injection",
+      "description": "Vulnerable branch: request 2 returns HTTP 500 (a real Postgres syntax error); request 3 returns all 8 products even though the search term matches nothing literally. Secured branch: request 2 returns 200 with an empty array; request 3 also returns 200 with an empty array (the whole payload is treated as a literal, harmless search string).",
+      "item": [
+        {
+          "name": "1. Normal search — control",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/products/search?name=iphone"
+          }
+        },
+        {
+          "name": "2. Diagnostic — lone quote",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/products/search?name=test%27"
+          }
+        },
+        {
+          "name": "3. Tautology + comment injection",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/products/search?name=x%27%20OR%20%271%27%3D%271%27%20--%20"
+          }
+        }
+      ]
+    },
+    {
+      "name": "V03 - Stored XSS (API can only seed it — see note)",
+      "description": "The backend stores this comment exactly as submitted on BOTH branches - that's correct, and not the bug. The vulnerability is entirely in how the frontend renders it, so it can't be shown as a response-body difference here. Run request 1 once (on whichever branch), then open http://127.0.0.1:3000/products/4 in a real browser to see the actual difference: vulnerable branch pops the alert, secured branch shows it as plain text. See tests/playwright/xss-regression.spec.ts for the automated version of this check.",
+      "item": [
+        {
+          "name": "1. Submit review with XSS payload",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{rahul_token}}" }
+            ],
+            "url": "{{base_url}}/products/4/reviews",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rating\": 5,\n  \"comment\": \"<img src=x onerror=\\\"alert('Security Training Demo')\\\">\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
+          "name": "2. View reviews for product 4 (raw stored value)",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/products/4/reviews"
+          }
+        }
+      ]
+    },
+    {
+      "name": "V04B - Username Enumeration",
+      "description": "Compare the `error` field in both responses. Vulnerable branch: request 1 says \"User does not exist\", request 2 says \"Incorrect password\" — two different messages reveal whether the account exists. Secured branch: both requests return the identical \"Invalid email or password\".",
+      "item": [
+        {
+          "name": "1. Login — unknown email",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"definitely-not-a-real-user@test.com\",\n  \"password\": \"whatever123\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
+          "name": "2. Login — known email, wrong password",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"priya@test.com\",\n  \"password\": \"wrong-password-123\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "V04C - Logout Token Replay",
+      "description": "Run these four requests in order (they use their own dedicated token variable so they don't disturb the shared rahul_token used elsewhere in this collection). Request 4 is the payoff: vulnerable branch returns 200 (the token still works after logout); secured branch returns 401.",
+      "item": [
+        {
+          "name": "1. Login as Rahul (dedicated for this test)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"rahul@test.com\",\n  \"password\": \"Rahul123!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const rahulV04cLoginData = pm.response.json();",
+                  "pm.collectionVariables.set('rahul_token_v04c', rahulV04cLoginData.token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. Access protected endpoint — before logout",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{rahul_token_v04c}}" }],
+            "url": "{{base_url}}/orders"
+          }
+        },
+        {
+          "name": "3. Logout",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{rahul_token_v04c}}" }],
+            "url": "{{base_url}}/auth/logout"
+          }
+        },
+        {
+          "name": "4. Replay the SAME token — after logout",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{rahul_token_v04c}}" }],
+            "url": "{{base_url}}/orders"
+          }
+        }
+      ]
+    },
+    {
+      "name": "V05 - Plaintext Password Storage (DB check, not an API response)",
+      "description": "No API response ever contains a password field on either branch - that would be a different, worse bug. Run request 1 to create a fresh test user, then inspect the database directly:\n\ndocker compose exec postgres psql -U secureshop -d secureshop -c \"SELECT email, password FROM users ORDER BY id DESC LIMIT 1;\"\n\nVulnerable branch: the password column shows the real, usable password in plain text. Secured branch: it shows a $2b$... bcrypt hash.",
+      "item": [
+        {
+          "name": "1. Register a fresh test user",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/auth/register",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"DB Check\",\n  \"email\": \"db-check-{{$timestamp}}@test.com\",\n  \"password\": \"CheckMe123!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "V06A-C - Verbose Error Responses",
+      "description": "An out-of-range integer ID causes a genuine Postgres error regardless of which branch you're on - that's what makes this trigger independent of V02's fix. Vulnerable branch: the response body includes `stack`, `name`, and `code` fields with real internal detail (source file path, Postgres error code). Secured branch: only the generic {\"error\":\"Something went wrong. Please try again later.\"}.",
+      "item": [
+        {
+          "name": "Trigger a genuine server error",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/products/99999999999"
+          }
+        }
+      ]
+    },
+    {
+      "name": "V06B - Exposed Debug Endpoint",
+      "description": "No Authorization header is sent. Vulnerable branch: 200 with synthetic config details. Secured branch: 404 (the route doesn't exist at all).",
+      "item": [
+        {
+          "name": "GET /debug/config (no auth)",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/debug/config"
+          }
+        }
+      ]
+    },
+    {
+      "name": "V07 - Checkout Price Manipulation",
+      "description": "productId 6 (Mechanical Keyboard) really costs 3499.00. This request tampers the price field to 1. Vulnerable branch: the created order's total_amount is \"1.00\". Secured branch: total_amount is \"3499.00\" - the tampered field is silently ignored. Note: each run decrements stock by 1 (seeded at 80), so this is safe to run many times before a reseed.",
+      "item": [
+        {
+          "name": "Checkout with a tampered price",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{rahul_token}}" }
+            ],
+            "url": "{{base_url}}/orders",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    { \"productId\": 6, \"quantity\": 1, \"price\": 1 }\n  ]\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "V04A - No Login Rate Limiting (run this LAST — see note)",
+      "description": "Deliberately placed last: this folder exists to burn through the login rate limit, so running it earlier would cause confusing 401/429s in every folder after it. Click Send on the one request below 6 times in a row (or use Postman's Collection Runner on just this request, 6 iterations, 0ms delay). Vulnerable branch: every attempt returns 401 forever, no matter how many times you send it. Secured branch: the 6th attempt within a minute returns 429. After running this, wait 60 seconds before re-running '0. Setup' if you plan to demo anything else.",
+      "item": [
+        {
+          "name": "Failed login attempt (send me repeatedly)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"rate-limit-demo@test.com\",\n  \"password\": \"wrong-password\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

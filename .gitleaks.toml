@@ -1,0 +1,21 @@
+# RSA SecureShop gitleaks config.
+#
+# Run: gitleaks detect --source . --config .gitleaks.toml --no-git
+#
+# gitleaks' default ruleset (vendor key formats, high-entropy strings) finds
+# NOTHING in this repo - `FAKE_DEMO_API_KEY=rsa-training-not-a-real-key` in
+# .env.example is deliberately low-entropy and human-readable, so it doesn't
+# match any default pattern. That's an intentional teaching point: secret
+# scanners need to be tuned with rules for an organization's own naming
+# conventions, not just generic vendor-key formats. The custom rule below
+# adds that tuning for this repo's one (fake, harmless) demo secret.
+title = "RSA SecureShop secret-scanning config"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "rsa-secureshop-fake-demo-key"
+description = "RSA SecureShop training demo API key (intentionally fake - see .env.example)"
+regex = '''FAKE_DEMO_API_KEY\s*=\s*['"]?[A-Za-z0-9-]+['"]?'''
+tags = ["training-demo"]

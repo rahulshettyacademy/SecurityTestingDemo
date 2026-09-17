@@ -79,5 +79,26 @@ once they know how.
 
 ---
 
+## V03 — Injection: Stored Cross-Site Scripting in Product Reviews
+
+1. **Vulnerability ID:** V03
+2. **Vulnerability name:** Stored XSS via unsafe HTML rendering of review comments
+3. **OWASP category:** A03:2021 – Injection (Cross-Site Scripting)
+4. **Feature:** Product Reviews
+5. **API endpoint:** Written via `POST /api/products/:id/reviews`, rendered via `GET /api/products/:id/reviews`
+6. **Vulnerable code location:** `frontend/src/pages/ProductDetail.tsx` — the review list renders `<p dangerouslySetInnerHTML={{ __html: review.comment }} />` instead of `<p>{review.comment}</p>`. (The backend stores the comment exactly as submitted — that part is normal and unchanged; the flaw is entirely in how it's rendered.)
+7. **What the normal user does:** Writes a genuine review ("Great phone, camera quality is excellent!") which is stored and shown under the product.
+8. **What the security tester changes:** Submits a review whose comment is `<img src=x onerror="alert('Security Training Demo')">` instead of plain text.
+9. **Expected vulnerable behavior:** The review is stored as-is (the API happily accepts HTML in the `comment` field). The next time **any** visitor opens that product's page, the browser parses the stored comment as HTML, the `<img>` tag's invalid `src` fails to load, and its `onerror` handler fires, executing the attacker-supplied JavaScript in the victim's browser session. This is the difference between "reflected" (attacker's own request) and "stored" XSS: every visitor to the page is affected, not just the person who submitted the review.
+10. **Why the vulnerability exists:** React escapes interpolated text by default (`{review.comment}` would have rendered the `<img ...>` as inert text, not markup). `dangerouslySetInnerHTML` is React's explicit, intentionally-named escape hatch that opts *out* of that protection — someone chose to render the comment as raw HTML, most plausibly to "support formatting," without sanitizing it first.
+11. **Secured implementation:** `secured` branch, same file. Reverts to `<p>{review.comment}</p>` — plain text interpolation, which React automatically HTML-escapes.
+12. **How the remediation works:** With plain interpolation, any `<`, `>`, `&`, or quote characters in the comment are rendered as literal, visible text (e.g. the browser displays the string `<img src=x onerror="...">` instead of running it) rather than being parsed as markup. Untrusted data is never treated as executable content.
+13. **How to verify the fix:** Submit the same `<img src=x onerror=...>` review comment. Confirm no dialog fires and the product page instead displays the literal angle-bracket text of the payload.
+14. **Tools that may detect it:** Semgrep has a built-in rule for `dangerouslySetInnerHTML` usage (flags it as a potential XSS sink regardless of whether the data is sanitized). OWASP ZAP's active scan can detect reflected/stored XSS patterns but works best combined with manual confirmation, since it can't always tell a false positive from real script execution.
+15. **Best detection approach:** SAST (Semgrep) is the fastest way to catch `dangerouslySetInnerHTML` usage at review time; manual testing (submit a payload, reopen the page, watch for execution) is how a QA engineer verifies real-world impact.
+16. **Suggested AI prompts:** See `AI_SECURITY_PROMPTS.md`, section "V03".
+
+---
+
 *(Further vulnerabilities are appended below as they are introduced on the
 `vulnerable` branch.)*

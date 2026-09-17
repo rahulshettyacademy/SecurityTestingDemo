@@ -75,8 +75,7 @@ export function ProductDetail() {
           {reviews.map((review) => (
             <li key={review.id}>
               <strong>{review.author}</strong> — {review.rating}/5
-              {/* Review comment rendered as plain text: React escapes it automatically. */}
-              <p>{review.comment}</p>
+              <p dangerouslySetInnerHTML={{ __html: review.comment }} />
             </li>
           ))}
         </ul>

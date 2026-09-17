@@ -227,5 +227,26 @@ once they know how.
 
 ---
 
+## V07 — Insecure Design: Checkout Trusts a Client-Supplied Price
+
+1. **Vulnerability ID:** V07
+2. **Vulnerability name:** Business logic flaw — checkout price is taken from the request instead of the database
+3. **OWASP category:** A04:2021 – Insecure Design
+4. **Feature:** Cart / Checkout
+5. **API endpoint:** `POST /api/orders`
+6. **Vulnerable code location:** `backend/src/controllers/orderController.ts`, function `createOrder`
+7. **What the normal user does:** Adds a product to the cart and checks out; the frontend sends `{"items":[{"productId":6,"quantity":1,"price":3499}]}` — the real price, because that's what's in the cart.
+8. **What the security tester changes:** Intercepts the checkout request (browser DevTools Network tab, or replays it in Postman/Burp) and edits the `price` field to `1` before it reaches the server: `{"productId":6,"quantity":1,"price":1}`.
+9. **Expected vulnerable behavior:** The order is created successfully with `total_amount: "1.00"` for a product whose real database price is ₹3,499. The server still checks that the product exists and has stock (so this isn't a "buy anything" bug — the product must be real) — but it never re-derives the *price* from the database.
+10. **Why the vulnerability exists:** `createOrder` uses `item.price` from the request body when present, only falling back to `product.price` from the database if the client omits it: `const unitPrice = item.price !== undefined ? Number(item.price) : Number(product.price)`. This is the classic "trust the client" business-logic mistake — the request looks completely normal and the code runs exactly as designed, but the design itself is wrong: price should never be a trust decision made by the browser.
+11. **Secured implementation:** `secured` branch, same file/function. `item.price` is never read; `unitPrice` is unconditionally `Number(product.price)` from the row just fetched from the database.
+12. **How the remediation works:** The client can still *tell* the server which products and quantities it wants, but has no way to influence what they cost — the price is always looked up fresh, server-side, from the single source of truth (the `products` table), inside the same transaction that reserves stock.
+13. **How to verify the fix:** Repeat the tampered request from step 8; expect `total_amount` to be the real price (₹3,499), not ₹1 — the `price` field in the request body is silently ignored.
+14. **Tools that may detect it:** This is very hard for any automated scanner (SAST, DAST, or SCA) to catch reliably, because the request is syntactically and semantically valid — nothing about it looks malformed or "attack-shaped." A DAST tool has no way to know ₹1 is "wrong" for this product.
+15. **Best detection approach:** Manual testing exclusively — a QA engineer who understands the business rule ("price must come from the catalog, not the request") is the only reliable way to catch this class of bug. This is a great example for teaching students *why* manual testing and threat modeling remain essential even with good scanner coverage.
+16. **Suggested AI prompts:** See `AI_SECURITY_PROMPTS.md`, section "V07".
+
+---
+
 *(Further vulnerabilities are appended below as they are introduced on the
 `vulnerable` branch.)*

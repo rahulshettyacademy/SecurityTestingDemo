@@ -67,7 +67,6 @@ export async function createOrder(req: Request, res: Response): Promise<void> {
     const lineItems: { productId: number; quantity: number; unitPrice: number }[] = [];
 
     for (const item of items) {
-      // Authoritative price always comes from the database, never from the request body.
       const productResult = await client.query(
         "SELECT id, price, stock FROM products WHERE id = $1 FOR UPDATE",
         [item.productId]
@@ -84,7 +83,14 @@ export async function createOrder(req: Request, res: Response): Promise<void> {
         throw new Error(`Insufficient stock for product ${item.productId}`);
       }
 
-      const unitPrice = Number(product.price);
+      // SECURITY-LAB-VULNERABILITY: V07 - Insecure Design (client-controlled price)
+      // The unit price is taken from the request body (item.price) whenever
+      // the client supplies one, instead of always using product.price from
+      // the database. A tampered request such as
+      // {"productId":6,"quantity":1,"price":1} lets the caller name their
+      // own price for a real product - the server still validates that the
+      // product exists and has stock, but not that the price is legitimate.
+      const unitPrice = item.price !== undefined ? Number(item.price) : Number(product.price);
       totalAmount += unitPrice * quantity;
       lineItems.push({ productId: product.id, quantity, unitPrice });
 

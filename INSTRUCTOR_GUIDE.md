@@ -18,6 +18,10 @@ once they know how.
 
 ## V01 — Broken Access Control (Horizontal): Insecure Direct Object Reference
 
+**Tester mindset shift**
+- **As a functional tester:** You log in as Rahul, open "My Orders," click into order #1001, and confirm the details display correctly. Test passed.
+- **As a security tester:** That request had an order ID in it. What if I take that exact same request and change the ID to one that isn't mine — does the server check who's asking, or does it just hand back whatever ID I give it?
+
 1. **Vulnerability ID:** V01
 2. **Vulnerability name:** Insecure Direct Object Reference (IDOR) on order lookup
 3. **OWASP category:** A01:2021 – Broken Access Control
@@ -39,6 +43,10 @@ once they know how.
 ---
 
 ## V01B — Broken Access Control (Vertical): Missing Role Check
+
+**Tester mindset shift**
+- **As a functional tester:** You log in as the admin, open the admin dashboard, and confirm the user list loads correctly. Test passed.
+- **As a security tester:** The UI hides the "Admin" link for regular customers — but does the *server* actually enforce that, or is hiding a button all that's stopping anyone? What happens if I call the exact same admin API directly while logged in as Rahul instead?
 
 1. **Vulnerability ID:** V01B
 2. **Vulnerability name:** Vertical privilege escalation via missing role check
@@ -62,6 +70,10 @@ once they know how.
 
 ## V02 — Injection: SQL Injection via String Concatenation
 
+**Tester mindset shift**
+- **As a functional tester:** You type "iphone" into the search box and confirm the iPhone shows up in the results. Test passed.
+- **As a security tester:** What if what I type isn't a product name at all — what if it's a piece of SQL syntax, like a stray quote? A functional tester expects "no results found" for a nonsense search; a security tester is watching for whether the *query itself* breaks or changes behavior, not just whether the right product appears.
+
 1. **Vulnerability ID:** V02
 2. **Vulnerability name:** SQL Injection (unsanitized string concatenation in a search query)
 3. **OWASP category:** A03:2021 – Injection
@@ -83,6 +95,10 @@ once they know how.
 ---
 
 ## V03 — Injection: Stored Cross-Site Scripting in Product Reviews
+
+**Tester mindset shift**
+- **As a functional tester:** You submit a review, reload the page, and confirm your review text displays correctly. Test passed.
+- **As a security tester:** What if what I submit isn't plain text at all — what if it's HTML, or a script? A functional tester checks that the text *reflects*; a security tester checks whether the page just *displays* it, or whether the browser actually *runs* it.
 
 1. **Vulnerability ID:** V03
 2. **Vulnerability name:** Stored XSS via unsafe HTML rendering of review comments
@@ -106,6 +122,10 @@ once they know how.
 
 ## V04A — Identification and Authentication Failures: No Login Rate Limiting
 
+**Tester mindset shift**
+- **As a functional tester:** You type the correct password once, confirm login succeeds. Then maybe you type the wrong password once, on purpose, and confirm you get a sensible error. Test passed either way.
+- **As a security tester:** What if I get it wrong — not once, but a hundred times, as fast as the server will let me? A functional tester tests one attempt at a time; a security tester asks whether *anything at all* stands between an attacker and unlimited guesses.
+
 1. **Vulnerability ID:** V04A
 2. **Vulnerability name:** Missing rate limiting / brute-force protection on login
 3. **OWASP category:** A07:2021 – Identification and Authentication Failures
@@ -127,6 +147,10 @@ once they know how.
 ---
 
 ## V04B — Identification and Authentication Failures: Username Enumeration
+
+**Tester mindset shift**
+- **As a functional tester:** You log in with a valid email and an intentionally wrong password, confirm you see a reasonable "login failed" message. Test passed.
+- **As a security tester:** What if I compare that *exact wording* against what happens with an email that was never registered at all? A functional tester checks that an error appears; a security tester reads the error closely enough to ask whether its wording itself gives something away.
 
 1. **Vulnerability ID:** V04B
 2. **Vulnerability name:** Username/account enumeration via differing login error messages
@@ -150,6 +174,10 @@ once they know how.
 
 ## V04C — Identification and Authentication Failures: Logout Does Not Invalidate the Token
 
+**Tester mindset shift**
+- **As a functional tester:** You click "Logout," confirm you're returned to the login screen, and confirm the UI no longer shows your account data. Test passed.
+- **As a security tester:** The *UI* can't see my data anymore — but does the *server* actually agree I'm logged out? A functional tester trusts what the screen shows; a security tester holds onto the token that was issued before logout and replays it directly against the API to check.
+
 1. **Vulnerability ID:** V04C
 2. **Vulnerability name:** Session/token logout failure (token remains valid after logout)
 3. **OWASP category:** A07:2021 – Identification and Authentication Failures
@@ -172,6 +200,10 @@ once they know how.
 
 ## V05 — Cryptographic Failures: Plaintext Password Storage
 
+**Tester mindset shift**
+- **As a functional tester:** You register a new account, confirm login succeeds, confirm you can use the app. Test passed.
+- **As a security tester:** Registering worked identically either way, so this isn't something you can even see from outside the app - the question changes entirely, from "does this feature work" to "if an attacker ever got read access to this database by *any* means, what would be sitting in the password column?" (Item 18 below chains this with V02 to actually answer that question, live, over HTTP - no database access required.)
+
 1. **Vulnerability ID:** V05
 2. **Vulnerability name:** Plaintext password storage (no hashing)
 3. **OWASP category:** A02:2021 – Cryptographic Failures
@@ -189,10 +221,19 @@ once they know how.
 15. **Best detection approach:** Manual testing / direct database inspection — this is the clearest way to demonstrate the impact to students, and is also exactly the audit step a real security review would take.
 16. **Suggested AI prompts:** See `AI_SECURITY_PROMPTS.md`, section "V05".
 17. **Security regression test:** `security-tests/tests/v05-password-hashing.test.ts`
+18. **Chained with V02 (why this matters without DB access):** V05 alone isn't remotely exploitable - but it doesn't need to be, if any *other* vulnerability grants read access to the database. This app conveniently already has one. On the `vulnerable` branch, the same public, unauthenticated search endpoint from V02 can be used to read the `users` table directly:
+    ```
+    GET /api/products/search?name=nonexistentproduct' UNION SELECT id, email, password, role, 0, 0, '' FROM users --
+    ```
+    This returns every account's email and *plaintext, usable* password, disguised as "products" (the UNION lines up `users` columns against the 7 columns the products query expects). For a clean, responsible demo that doesn't touch real seeded users' credentials, register a throwaway account with a password you chose, then scope the same injection to just that row with `WHERE email='your-test-account@test.com'` appended before the `--`. Same request, but you get an unambiguous "I typed X, the database shows X" proof. On the `secured` branch, this same injection either fails (V02 is parameterized, so the `'` is just a literal character) or, if it somehow still worked, would only return a bcrypt hash — two independent layers of defense, either one of which stops the attack.
 
 ---
 
 ## V06A / V06C — Security Misconfiguration: Verbose Error Responses / Development Configuration Left On
+
+**Tester mindset shift**
+- **As a functional tester:** You send a well-formed request and confirm you get back the data you expect. If a request causes an error, that's usually the end of that test case - noted as a bug, move on.
+- **As a security tester:** An error response isn't a dead end, it's data. What if I send something malformed *on purpose* - an absurdly large ID, a broken value? A functional tester logs "500 error, test failed"; a security tester reads the *body* of that error carefully, because the error message itself might be the finding.
 
 1. **Vulnerability ID:** V06A/V06C
 2. **Vulnerability name:** Verbose error responses (stack traces, DB errors, and source file paths returned to the client) — V06A and V06C are documented together because they are the same root cause: this app's error handling was left in a "development-friendly" state everywhere, not just in one place.
@@ -219,6 +260,10 @@ once they know how.
 
 ## V06B — Security Misconfiguration: Unauthenticated Debug Endpoint
 
+**Tester mindset shift**
+- **As a functional tester:** You test the screens and buttons that exist in the app. If it's not in the UI or the documented API list, it's out of scope.
+- **As a security tester:** What exists that *isn't* linked from anywhere? A functional tester tests what's shown; a security tester asks what else might be reachable that nobody bothered to hide properly - old debug routes, forgotten test endpoints, anything a developer left behind.
+
 1. **Vulnerability ID:** V06B
 2. **Vulnerability name:** Debug/diagnostic endpoint exposed with no authentication
 3. **OWASP category:** A05:2021 – Security Misconfiguration
@@ -241,6 +286,10 @@ once they know how.
 
 ## V07 — Insecure Design: Checkout Trusts a Client-Supplied Price
 
+**Tester mindset shift**
+- **As a functional tester:** You add an item to your cart, check out, and confirm the total charged matches the item's listed price. Test passed.
+- **As a security tester:** The request that goes out includes the price as a field, alongside the product ID and quantity. What if I intercept that request and simply change the number before it reaches the server? A functional tester confirms the *happy path* total is correct; a security tester asks whether the server would even notice if that number were wrong.
+
 1. **Vulnerability ID:** V07
 2. **Vulnerability name:** Business logic flaw — checkout price is taken from the request instead of the database
 3. **OWASP category:** A04:2021 – Insecure Design
@@ -262,6 +311,10 @@ once they know how.
 ---
 
 ## V08 — Vulnerable and Outdated Components: Supply Chain / SCA Demo
+
+**Tester mindset shift**
+- **As a functional tester:** You confirm every feature of the app works correctly, including whatever third-party libraries it depends on under the hood - if the feature works, the dependency is doing its job.
+- **As a security tester:** "It works" says nothing about whether the code you *didn't* write has its own known vulnerabilities. This isn't something you can find by clicking through the app at all - it's not a request-and-response question, it's a "what's actually in package.json, and does anyone already know it's unsafe" question, which means reaching for a completely different tool (`npm audit`) instead of the app itself.
 
 1. **Vulnerability ID:** V08
 2. **Vulnerability name:** Outdated dependency with publicly documented vulnerabilities (`lodash@4.17.15`)

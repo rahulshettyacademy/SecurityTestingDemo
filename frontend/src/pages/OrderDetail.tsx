@@ -2,9 +2,11 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { ApiError, api } from "../api/client";
 import { OrderDetail as OrderDetailType } from "../api/types";
+import { useAuth } from "../context/AuthContext";
 
 export function OrderDetail() {
   const { orderId } = useParams();
+  const { user } = useAuth();
   const [order, setOrder] = useState<OrderDetailType | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -13,9 +15,16 @@ export function OrderDetail() {
     setOrder(null);
     api
       .get<OrderDetailType>(`/orders/${orderId}`)
-      .then(setOrder)
+      .then((data) => {
+        // Only show the order if it belongs to the logged-in user (admins can see any order).
+        if (user && data.user_id !== user.id && user.role !== "ADMIN") {
+          setError("You do not have access to this order");
+          return;
+        }
+        setOrder(data);
+      })
       .catch((err) => setError(err instanceof ApiError ? err.message : "Unable to load order"));
-  }, [orderId]);
+  }, [orderId, user]);
 
   if (error) {
     return <p className="error-text">{error}</p>;

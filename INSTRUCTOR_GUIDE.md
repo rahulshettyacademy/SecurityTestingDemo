@@ -19,8 +19,19 @@ once they know how.
 ## V01 — Broken Access Control (Horizontal): Insecure Direct Object Reference
 
 **Tester mindset shift**
-- **As a functional tester:** You log in as Rahul, open "My Orders," click into order #1001, and confirm the details display correctly. Test passed.
-- **As a security tester:** That request had an order ID in it. What if I take that exact same request and change the ID to one that isn't mine — does the server check who's asking, or does it just hand back whatever ID I give it?
+- **As a functional tester:** You log in as Rahul, open "My Orders," click into order #1001, and confirm the details display correctly. You even try the negative case — change the browser URL to `/orders/1002` — and the page says "You do not have access to this order." Test passed.
+- **As a security tester:** The *page* refused, but did the *server*? Open DevTools → Network on that same `/orders/1002` page, or replay `GET /api/orders/1002` with Rahul's token in Postman/curl. Don't trust the UI's answer — ask the API directly.
+
+> **Demo flow (UI says "secure", API says otherwise):** On the `vulnerable`
+> branch the frontend (`frontend/src/pages/OrderDetail.tsx`) hides orders
+> that don't belong to the logged-in user, so the browser looks *exactly*
+> like the `secured` branch — same "You do not have access to this order"
+> message. But that check runs in the browser *after* the API has already
+> returned Priya's full order with `200 OK`. Show the UI first ("looks
+> fixed, test passed"), then open the Network tab / run the Postman V01
+> folder against the Unsecured environment to reveal the leak, then flip to
+> the Secured environment and see `403`. Lesson: a client-side check is UX,
+> not access control.
 
 1. **Vulnerability ID:** V01
 2. **Vulnerability name:** Insecure Direct Object Reference (IDOR) on order lookup
@@ -30,7 +41,7 @@ once they know how.
 6. **Vulnerable code location:** `backend/src/controllers/orderController.ts`, function `getOrderById`
 7. **What the normal user does:** Rahul logs in, opens "My Orders," and clicks into order **#1001**, which he owns. The frontend calls `GET /api/orders/1001`.
 8. **What the security tester changes:** While logged in as Rahul, change the order id in the URL (or replay the request in Postman/curl/DevTools) to **1002** — an order that belongs to Priya (user id 102).
-9. **Expected vulnerable behavior:** The API returns `200 OK` with Priya's full order details (items, total, status) even though the request is authenticated as Rahul, not Priya.
+9. **Expected vulnerable behavior:** The API returns `200 OK` with Priya's full order details (items, total, status) even though the request is authenticated as Rahul, not Priya. The browser page shows "You do not have access to this order" (a client-side-only check), so the leak is only visible in the Network tab or when calling the API directly.
 10. **Why the vulnerability exists:** The handler calls `authenticate` (so it correctly rejects anonymous requests) but never compares `order.user_id` to `req.user.userId` before returning the row. Authentication is confused for authorization — a very common real-world mistake.
 11. **Secured implementation:** `secured` branch, same file/function. After loading the order, the handler checks `order.user_id !== req.user.userId && req.user.role !== 'ADMIN'` and returns `403 Forbidden` if the requester is neither the owner nor an admin.
 12. **How the remediation works:** Ownership is enforced server-side on every request, independent of what the UI shows or hides. An admin override is explicit and role-checked, not implicit.

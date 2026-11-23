@@ -58,15 +58,14 @@ everywhere below.
 ## 3. Get the code
 
 ```bash
-git clone <REPO_URL> secapp
+git clone https://github.com/rahulshettyacademy/SecurityTestingDemo.git secapp
 ```
 
 ```bash
 cd secapp
 ```
 
-Replace `<REPO_URL>` with the repository link your instructor gave you. This
-folder (`secapp`) is your **vulnerable** copy.
+This folder (`secapp`) is your **vulnerable** copy.
 
 ---
 
@@ -149,7 +148,7 @@ docker compose -p secureshop-vuln up --build -d
 From the folder that **contains** `secapp` (one level up):
 
 ```bash
-git clone <REPO_URL> secapp-secured
+git clone https://github.com/rahulshettyacademy/SecurityTestingDemo.git secapp-secured
 ```
 
 ```bash
